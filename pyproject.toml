@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crstlmeth"
+version = "0.1.0"                          # PEP 440
+description = "Visualize methylation and copy-number data from BedMethyl files"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Carlos Classen", email = "cclassen@ukaachen.de" }]
+
+# Runtime dependencies only (keep minimal; upper pins avoided)
+dependencies = [
+  "click>=8.1",
+  "numpy>=2.0",
+  "pandas>=2.2",
+  "matplotlib>=3.8",
+  "seaborn>=0.13",
+  "scipy>=1.11",
+  "statsmodels>=0.14",
+  "pysam>=0.22",
+  "streamlit>=1.33",
+]
+
+[project.scripts]
+crstlmeth = "crstlmeth.cli:main"
+
+# Optional extras for dev/docs (install with: pip install -e .[dev,docs])
+[project.optional-dependencies]
+dev = ["black>=24.0", "ruff>=0.4", "pytest>=8.2", "pre-commit>=3.7"]
+docs = ["sphinx>=7.3", "sphinx-click>=6.0", "furo>=2024.8.6"]
+
+[tool.black]
+line-length = 80
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+select = ["E", "F", "B", "I"]
+ignore = ["E501"]
+fixable = ["E", "F", "I", "B"]
+
+[tool.setuptools]
+include-package-data = true                 # allow package-data below
+
+# Find all subpackages under ./crstlmeth
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["crstlmeth*"]
+
+# Ship non-Python assets inside the wheel
+[tool.setuptools.package-data]
+"crstlmeth.kits" = ["*.bed"]
+"crstlmeth.refs" = ["*.cmeth"]
+"crstlmeth.web.assets" = ["logo.svg"]

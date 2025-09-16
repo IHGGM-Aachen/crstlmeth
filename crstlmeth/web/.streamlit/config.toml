@@ -1,0 +1,10 @@
+[theme]
+base                    = "dark"
+primaryColor            = "#CC0000"      # deep soviet red
+backgroundColor         = "#000000"
+secondaryBackgroundColor= "#111111"
+textColor               = "#E0E0E0"
+linkColor               = "#FF5555"      # softer red for links
+codeBackgroundColor     = "#111111"
+font                    = "monospace"
+baseRadius              = "0"            # square corners everywhere
