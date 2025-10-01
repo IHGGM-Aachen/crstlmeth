@@ -8,3 +8,6 @@ linkColor               = "#FF5555"      # softer red for links
 codeBackgroundColor     = "#111111"
 font                    = "monospace"
 baseRadius              = "0"            # square corners everywhere
+
+[server]
+maxUploadSize = 1024

@@ -20,16 +20,17 @@ __all__ = [
 # regular expressions to classify filenames
 _BEDM_RE = re.compile(
     r"""
-    ^(?P<sample>.+?)_                 # sample ID (lazy)
-      (?P<hap>1|2|ungrouped)          # haplotype tag
-      (?:\.[^.]+)*                    # optional extra suffix(es)
-      \.bedmethyl(?:\.gz)?$           # extension
+    ^(?P<sample>.+?)               # sample id (lazy)
+    [._-]                          # separator before hap
+    (?P<hap>1|2|ungrouped)         # hap tag
+    (?:[._-]\w+)*                  # optional extra tokens (e.g., wf_mods, LR)
+    \.bedmethyl(?:\.gz)?$          # extension
     """,
-    re.VERBOSE,
+    re.IGNORECASE | re.VERBOSE,
 )
 
-_CMETH_RE = re.compile(r".+\.cmeth$")
-_BED_RE = re.compile(r".+\.bed$")
+_CMETH_RE = re.compile(r".+\.cmeth$", re.IGNORECASE)
+_BED_RE = re.compile(r".+\.bed$", re.IGNORECASE)
 
 
 def scan_bedmethyl(folder: Path) -> Dict[str, Dict[str, Path]]:

@@ -1,7 +1,7 @@
 """
 crstlmeth.web.sidebar
 
-compact sidebar with an overview of discovered files and session id
+Read-only sidebar. Never mutates paths or discovery state.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import streamlit as st
 
 def _fmt_path(p: str | None) -> str:
     if not p:
-        return "(none)"
+        return "(unset)"
     try:
         return str(Path(p).expanduser().resolve())
     except Exception:
@@ -22,24 +22,24 @@ def _fmt_path(p: str | None) -> str:
 
 
 def render_sidebar() -> None:
-    """
-    draw a compact overview with counts, short lists, paths, and session id
-    """
+    """Draw a compact overview from session_state (no side effects)."""
     # stable session id
     if "session_id" not in st.session_state:
         st.session_state.session_id = uuid.uuid4().hex[:8]
 
-    bed_by_sample = st.session_state.get("bed_by_sample", {})
-    cmeth_files = st.session_state.get("cmeth_files", [])
-    custom_beds = st.session_state.get("custom_beds", [])
+    bed_by_sample = st.session_state.get("bed_by_sample", {}) or {}
+    cmeth_files = st.session_state.get("cmeth_files", []) or []
+    custom_beds = st.session_state.get("custom_beds", []) or []
 
-    data_dir = st.session_state.get("data_dir", "")
-    ref_dir = st.session_state.get("ref_dir", "")
-    region_dir = st.session_state.get("region_dir", "")
-    outdir = st.session_state.get("outdir", "output")
-
-    outdir_resolved = Path(outdir).expanduser().resolve()
-    st.session_state["outdir_resolved"] = str(outdir_resolved)
+    data_dir = st.session_state.get("data_dir", "") or ""
+    ref_dir = st.session_state.get("ref_dir", "") or ""
+    region_dir = st.session_state.get("region_dir", "") or ""
+    outdir_disp = (
+        st.session_state.get(
+            "outdir_resolved", st.session_state.get("outdir", "")
+        )
+        or ""
+    )
 
     st.sidebar.markdown("## overview")
 
@@ -49,40 +49,29 @@ def render_sidebar() -> None:
     st.sidebar.markdown(f"**cmeth:** {len(cmeth_files)} files")
     st.sidebar.markdown(f"**regions:** {len(custom_beds)} beds")
 
-    # spaced lists
     with st.sidebar.expander("sample ids", expanded=False):
         if n_samples:
-            st.code(
-                "\n".join(
-                    sorted(bed_by_sample.keys())[:25]
-                    + (["..."] if n_samples > 25 else [])
-                ),
-                language="text",
-            )
+            ids = sorted(bed_by_sample.keys())
+            show = ids[:25] + (["..."] if len(ids) > 25 else [])
+            st.code("\n".join(show), language="text")
         else:
             st.code("(none)", language="text")
 
     with st.sidebar.expander("references", expanded=False):
         if cmeth_files:
-            st.code(
-                "\n".join(
-                    [Path(x).name for x in cmeth_files[:25]]
-                    + (["..."] if len(cmeth_files) > 25 else [])
-                ),
-                language="text",
-            )
+            show = [Path(x).name for x in cmeth_files[:25]]
+            if len(cmeth_files) > 25:
+                show.append("...")
+            st.code("\n".join(show), language="text")
         else:
             st.code("(none)", language="text")
 
     with st.sidebar.expander("custom beds", expanded=False):
         if custom_beds:
-            st.code(
-                "\n".join(
-                    [Path(x).name for x in custom_beds[:25]]
-                    + (["..."] if len(custom_beds) > 25 else [])
-                ),
-                language="text",
-            )
+            show = [Path(x).name for x in custom_beds[:25]]
+            if len(custom_beds) > 25:
+                show.append("...")
+            st.code("\n".join(show), language="text")
         else:
             st.code("(none)", language="text")
 
@@ -94,7 +83,7 @@ def render_sidebar() -> None:
                 f"data : {_fmt_path(data_dir)}",
                 f"cmeth: {_fmt_path(ref_dir)}",
                 f"beds : {_fmt_path(region_dir)}",
-                f"out  : {_fmt_path(str(outdir_resolved))}",
+                f"out  : {_fmt_path(outdir_disp)}",
             ]
         ),
         language="text",

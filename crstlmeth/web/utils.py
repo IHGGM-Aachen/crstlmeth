@@ -1,80 +1,78 @@
-# crstlmeth/web/utils.py
 """
 crstlmeth.web.utils
 
-streamlit utility helpers for temporary output folders, timestamping,
-and discovery routines used across interactive pages
+Shared utilities.
 """
 
-import re
-from collections import defaultdict
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-_TMP = Path.cwd() / "tmp"
 
-
+# ── misc helpers ─────────────────────────────────────────────────────
 def timestamp() -> str:
-    """
-    generate a unique timestamp suitable for filenames
-    """
     return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
 
 def ensure_tmp() -> Path:
-    """
-    ensure that a temporary output folder exists and return its path
-    """
-    _TMP.mkdir(exist_ok=True)
-    return _TMP
+    p = Path.cwd() / "tmp"
+    p.mkdir(exist_ok=True)
+    return p
 
 
 def list_builtin_kits() -> Dict[str, Path]:
-    """
-    return builtin kits shipped with the tool as a mapping
-    {kit_name: <bed file path>}
-    """
     pkg_root = Path(__file__).resolve().parents[1]
     kits_dir = pkg_root / "kits"
-
     kits: Dict[str, Path] = {}
     for bed in kits_dir.glob("*_meth.bed"):
         kits[bed.stem.replace("_meth", "")] = bed
-
     return kits
 
 
-def scan_bedmethyl_dir(path: str | Path) -> dict[str, dict[str, Path]]:
+def list_bundled_refs() -> Dict[str, Path]:
     """
-    recursively scan a folder for indexed bedmethyl files and
-    group them as {sample_id: {"1": ..., "2": ..., "ungrouped": ...}}
-
-    only files with valid suffixes and index files are returned
+    return bundled .cmeth references shipped with the package
+    as {ref_stem: <path>}. works regardless of install location.
     """
-    _BED_RE = re.compile(
-        r"""
-        ^(?P<sample>[^_.]+?)        # sample id up to first _ or .
-        (?:_mods)?                  # optional _mods infix
-        [_.]                        # separator _ or .
-        (?P<hap>1|2|ungrouped)      # haplotype label
-        (?:\.[^.]+)*                # any extra suffixes
-        \.bedmethyl(?:\.gz)?$       # required extension
-        """,
-        re.VERBOSE,
-    )
+    pkg_root = Path(__file__).resolve().parents[1]
+    refs_dir = pkg_root / "refs"
+    out: Dict[str, Path] = {}
+    if refs_dir.exists():
+        for p in refs_dir.glob("*.cmeth"):
+            out[p.stem] = p
+    return out
 
-    path = Path(path)
-    out: dict[str, dict[str, Path]] = defaultdict(dict)
 
-    for f in path.rglob("*.bedmethyl.gz"):
-        if not (f.with_suffix(f.suffix + ".tbi")).exists():
-            continue
-        m = _BED_RE.match(f.name)
-        if not m:
-            continue
-        sample_id = m["sample"]
-        hap = m["hap"]
-        out[sample_id][hap] = f.resolve()
+# ── output + indexing helpers ───────────────────────────────────
+def default_output_dir_for(any_input: Path | None, session_id: str) -> Path:
+    """
+    Choose a per-session output folder near the input data if possible.
+    """
+    root = (any_input.parent if any_input else Path.cwd()).resolve()
+    out = root / "crstlmeth_out" / session_id
+    out.mkdir(parents=True, exist_ok=True)
+    return out
 
-    return {sid: haps for sid, haps in out.items()}
+
+def ensure_tabix_index(bgz: Path) -> None:
+    """
+    Ensure *.tbi exists for a .bedmethyl.gz file using tabix if available.
+    No-op if index already exists.
+    """
+    if not bgz.exists():
+        return
+    tbi = Path(str(bgz) + ".tbi")
+    if tbi.exists():
+        return
+    # bgzip/tabix must be on PATH for this to work
+    try:
+        subprocess.run(
+            ["tabix", "-f", "-s", "1", "-b", "2", "-e", "3", str(bgz)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except Exception:
+        # best-effort: ignore errors; caller may surface a message
+        pass

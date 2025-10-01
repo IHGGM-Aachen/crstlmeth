@@ -36,7 +36,7 @@ with col_logo:
 with col_txt:
     st.title("crstlmeth")
     st.markdown(
-        "crstlmeth is a toolkit for analysis, computation and visualization of **bedmethyl** data."
+        "crstlmeth is a toolkit for analysis and visualization of **bedmethyl** data."
     )
 
 # ────────────────────────────────────────────────────────────────────
@@ -44,12 +44,10 @@ with col_txt:
 # ────────────────────────────────────────────────────────────────────
 st.markdown(
     """
-crstlmeth setup and workflow in three steps:
-1. set folders below (data, cmeth, custom regions, output).
-2. use the **references page** to create or view `.cmeth` cohort files.
-3. use the **analyze page** to draw methylation and copy-number figures from references and targets.
-
-tips: hover the input labels for extra hints; the sidebar shows a live overview of discovered files.
+workflow:
+1. set folders (data, references, optional custom regions) and scan.
+2. use **analyze** to upload targets and plot (defaults to bundled refs).
+3. use **references** to create/view `.cmeth` cohort files.
 """
 )
 
@@ -60,40 +58,32 @@ st.divider()
 # ────────────────────────────────────────────────────────────────────
 with st.container(border=True):
     st.subheader(
-        "folders",
-        help="set input and output folders; click scan to update the dashboard",
+        "folders", help="set input folders; click scan to update the dashboard"
     )
 
     c1, c2 = st.columns([1, 1], gap="large")
-    c3, c4 = st.columns([1, 1], gap="large")
+    c3 = st.columns([1])[0]
 
     with c1:
         st.text_input(
             "data directory",
             value=st.session_state.get("data_dir", ""),
-            help="root with bgzipped + indexed *.bedmethyl.gz files; subfolders are allowed",
+            help="root with bgzipped + indexed *.bedmethyl.gz files; subfolders allowed",
             key="data_dir",
         )
     with c2:
         st.text_input(
             "cmeth reference folder",
             value=st.session_state.get("ref_dir", ""),
-            help="folder containing *.cmeth files (full or aggregated)",
+            help="folder containing *.cmeth files",
             key="ref_dir",
         )
     with c3:
         st.text_input(
             "custom regions folder",
             value=st.session_state.get("region_dir", ""),
-            help="optional folder with extra *.bed files defining intervals",
+            help="optional folder with extra *.bed defining intervals",
             key="region_dir",
-        )
-    with c4:
-        st.text_input(
-            "output directory",
-            value=st.session_state.get("outdir", ""),
-            help="destination for generated figures and exports (required)",
-            key="outdir",
         )
 
     scan_clicked = st.button(
@@ -102,7 +92,7 @@ with st.container(border=True):
 
 
 # ────────────────────────────────────────────────────────────────────
-# scan on demand (or first load if nothing cached yet)
+# scan on demand
 # ────────────────────────────────────────────────────────────────────
 def _resolve_or_none(p: str) -> Path | None:
     p = (p or "").strip()
@@ -114,27 +104,10 @@ def _resolve_or_none(p: str) -> Path | None:
         return None
 
 
-def _maybe_scan() -> None:
-    """perform scans only if outdir is valid; update session_state"""
+def _scan() -> None:
     data_path = _resolve_or_none(st.session_state.get("data_dir", ""))
     ref_path = _resolve_or_none(st.session_state.get("ref_dir", ""))
     region_path = _resolve_or_none(st.session_state.get("region_dir", ""))
-    out_path = _resolve_or_none(st.session_state.get("outdir", ""))
-
-    if out_path is None:
-        # hard fail: outdir is required
-        st.error("Please set an **output directory** before scanning.")
-        # ensure we don't leave a stale resolved path in the session
-        st.session_state.pop("outdir_resolved", None)
-        return
-
-    # create output folder if it doesn't exist
-    try:
-        out_path.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        st.error(f"Failed to create output directory: {e}")
-        st.session_state.pop("outdir_resolved", None)
-        return
 
     with st.spinner("scanning folders …"):
         bed_by_sample = scan_bedmethyl(data_path) if data_path else {}
@@ -149,26 +122,19 @@ def _maybe_scan() -> None:
     st.session_state["bed_by_sample"] = bed_by_sample
     st.session_state["cmeth_files"] = cmeth_files
     st.session_state["custom_beds"] = custom_beds
-    st.session_state["outdir_resolved"] = str(out_path)
 
 
-# only scan when the user clicks; on first load do nothing until outdir is set
 if scan_clicked:
-    _maybe_scan()
+    _scan()
 
 # pull cached discoveries
 bed_by_sample = st.session_state.get("bed_by_sample", {})
 cmeth_files = st.session_state.get("cmeth_files", [])
 custom_beds = st.session_state.get("custom_beds", [])
-outdir_resolved = (
-    Path(st.session_state.get("outdir_resolved", ""))
-    if st.session_state.get("outdir_resolved")
-    else None
-)
 
 
 # ────────────────────────────────────────────────────────────────────
-# counts + completeness buckets
+# counts + dashboard
 # ────────────────────────────────────────────────────────────────────
 def _has(d: dict, key: str) -> bool:
     return key in d and d[key] is not None
@@ -178,55 +144,35 @@ n_samples = len(bed_by_sample)
 n_bed_files = sum(len(h) for h in bed_by_sample.values())
 n_cmeth = len(cmeth_files)
 n_beds = len(custom_beds)
-
 n_hap_resolved = sum(
     1 for d in bed_by_sample.values() if _has(d, "1") and _has(d, "2")
 )
 n_pooled_only = max(0, n_samples - n_hap_resolved)
 
-# ────────────────────────────────────────────────────────────────────
-# dashboard
-# ────────────────────────────────────────────────────────────────────
-
-# top status bar
 with st.container(border=True):
-    ok_data = n_bed_files > 0
-    ok_ref = n_cmeth > 0
-    ok_regions = n_beds > 0
-    ok_outdir = outdir_resolved is not None
-
     icon_ok = ":material/check_circle:"
     icon_no = ":material/cancel:"
 
-    s1, s2, s3, s4 = st.columns([1, 1, 1, 1], gap="large")
+    s1, s2, s3 = st.columns([1, 1, 1], gap="large")
     with s1:
         st.markdown(
-            f"**output**  \n{icon_ok if ok_outdir else icon_no} "
-            f"{'ready' if ok_outdir else 'missing'}",
-            help="required for writing figures and references",
+            f"**data**  \n{icon_ok if n_bed_files > 0 else icon_no} "
+            f"{'ready' if n_bed_files > 0 else 'not found'}",
+            help="bedmethyl inputs discovered",
         )
     with s2:
         st.markdown(
-            f"**data**  \n{icon_ok if ok_data else icon_no} "
-            f"{'ready' if ok_data else 'not found'}",
-            help="bedmethyl inputs discovered",
+            f"**references**  \n{icon_ok if n_cmeth > 0 else icon_no} "
+            f"{'ready' if n_cmeth > 0 else 'none'}",
+            help=".cmeth files available",
         )
     with s3:
         st.markdown(
-            f"**references**  \n{icon_ok if ok_ref else icon_no} "
-            f"{'ready' if ok_ref else 'none'}",
-            help=".cmeth files available",
-        )
-    with s4:
-        st.markdown(
-            f"**regions**  \n{icon_ok if ok_regions else icon_no} "
-            f"{'custom beds' if ok_regions else 'optional'}",
+            f"**regions**  \n{icon_ok if n_beds > 0 else icon_no} "
+            f"{'custom beds' if n_beds > 0 else 'optional'}",
             help="custom region BEDs (optional)",
         )
 
-st.write("")  # breathing room
-
-# row: haplotype-resolved vs pooled-only + total files
 r1c1, r1c2, r1c3 = st.columns([1, 1, 1], gap="large")
 with r1c1:
     box = st.container(border=True)
@@ -245,9 +191,6 @@ with r1c3:
     box.metric("bedmethyl files", f"{n_bed_files}")
     box.caption("all discovered *.bedmethyl.gz")
 
-st.write("")  # breathing room
-
-# separate lines: cmeth references and custom regions
 with st.container(border=True):
     st.metric("cmeth references", f"{n_cmeth}")
     st.caption(
@@ -258,11 +201,10 @@ with st.container(border=True):
     st.metric("custom region beds", f"{n_beds}")
     st.caption("optional extra *.bed", help="set 'custom regions folder' above")
 
-# next steps
 st.markdown(
     """
 **next steps**
+- go to **analyze** to upload targets and plot (bundled refs by default).
 - go to **references** to create aggregated or full `.cmeth` files.
-- go to **analyze** to produce methylation and copy-number figures using your selections.
 """
 )
