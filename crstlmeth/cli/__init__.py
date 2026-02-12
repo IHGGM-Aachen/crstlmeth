@@ -72,8 +72,15 @@ cli.add_command(reference)
 cli.add_command(calculate)
 cli.add_command(plot)
 
-
 @cli.command("web", help="launch the streamlit gui")
+@click.option(
+    "-c",
+    "--config",
+    type=click.Path(path_type=Path, dir_okay=False, exists=True, readable=True),
+    default=None,
+    show_default=False,
+    help="path to crstlmeth.toml; exported as CRSTLMETH_CONFIG for the web app",
+)
 @click.option(
     "--port",
     type=int,
@@ -82,7 +89,7 @@ cli.add_command(plot)
     help="port for the streamlit server",
 )
 @click.pass_context
-def web_cmd(ctx: click.Context, port: int) -> None:
+def web_cmd(ctx: click.Context, config: Path | None, port: int) -> None:
     """
     launch streamlit gui
 
@@ -101,14 +108,19 @@ def web_cmd(ctx: click.Context, port: int) -> None:
 
     app_py = Path(__file__).parent.parent / "web" / "app.py"
     log_path = Path(ctx.obj["log_file"]).resolve()
+    cfg_path = config.resolve() if config else None
 
-    click.echo(f"[crstlmeth] starting streamlit at :{port}  (log → {log_path})")
+    msg = f"[crstlmeth] starting streamlit at :{port}  (log → {log_path})"
+    if cfg_path:
+        msg += f"  (config → {cfg_path})"
+    click.echo(msg)
+
     log = get_logger_from_cli(ctx)
     log_event(
         log,
         cmd="web",
         event="web_start",
-        params={"port": port},
+        params={"port": port, "config": str(cfg_path) if cfg_path else ""},
         message=str(app_py),
     )
 
@@ -124,6 +136,9 @@ def web_cmd(ctx: click.Context, port: int) -> None:
         str(port),
     ]
     env = dict(**os.environ, CRSTLMETH_LOGFILE=str(log_path))
+    if cfg_path:
+        env["CRSTLMETH_CONFIG"] = str(cfg_path)
+
     subprocess.run(cmd, check=True, env=env)
 
 

@@ -53,6 +53,9 @@ include = ["crstlmeth*"]
 
 # Ship non-Python assets inside the wheel
 [tool.setuptools.package-data]
-"crstlmeth.kits" = ["*.bed"]
-"crstlmeth.refs" = ["*.cmeth"]
-"crstlmeth.web.assets" = ["logo.svg"]
+crstlmeth = [
+  "kits/*.bed",
+  "refs/*.cmeth",
+  "web/assets/*.svg",
+]
+

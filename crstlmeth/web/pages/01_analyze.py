@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 import traceback
-import uuid
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -24,6 +22,7 @@ from crstlmeth.core.methylation import Methylation
 from crstlmeth.core.references import read_cmeth
 from crstlmeth.core.regions import load_intervals
 from crstlmeth.web.sidebar import render_sidebar
+from crstlmeth.web.state import ensure_web_state, resolve_outdir
 from crstlmeth.web.utils import list_builtin_kits, list_bundled_refs
 
 # ────────────────────────────────────────────────────────────────────
@@ -32,29 +31,25 @@ from crstlmeth.web.utils import list_builtin_kits, list_bundled_refs
 st.set_page_config(
     page_title="crstlmeth - analyze", page_icon=":material/analytics:"
 )
+
+ensure_web_state()
+
 st.title("analyze")
 render_sidebar()
 
-# session + paths
-cmeth_files: list[str] = st.session_state.get("cmeth_files", [])
-orig_bed_by_sample: Dict[str, Dict[str, Path]] = st.session_state.get(
+# stable session id + stable outdir
+session_id: str = st.session_state["session_id"]
+out_dir = resolve_outdir(session_id)
+
+# log file env (CLI sets this; fall back to local file)
+default_log = os.getenv("CRSTLMETH_LOGFILE") or str(Path.cwd() / "crstlmeth.log.tsv")
+os.environ.setdefault("CRSTLMETH_LOGFILE", default_log)
+
+# session + discoveries
+cmeth_files: list[str] = st.session_state.setdefault("cmeth_files", [])
+orig_bed_by_sample: Dict[str, Dict[str, Path]] = st.session_state.setdefault(
     "bed_by_sample", {}
 )
-
-# stable session id + session temp outdir (under data_dir if set, else system tmp)
-session_id = st.session_state.get("session_id") or uuid.uuid4().hex[:8]
-st.session_state["session_id"] = session_id
-base_tmp = Path(st.session_state.get("data_dir") or tempfile.gettempdir())
-out_dir = base_tmp / "crstlmeth_out" / session_id
-out_dir.mkdir(parents=True, exist_ok=True)
-st.session_state["outdir_resolved"] = str(out_dir)  # keep other pages happy
-
-# log file env (optional)
-default_log = Path(
-    st.session_state.get("log_file", Path.cwd() / "crstlmeth.log.tsv")
-)
-os.environ.setdefault("CRSTLMETH_LOGFILE", str(default_log))
-
 
 # ────────────────────────────────────────────────────────────────────
 # helpers
@@ -97,17 +92,21 @@ def _make_grouped_choices(
     bundled_tag: str,
     external_tag: str,
 ) -> List[Tuple[str, Path]]:
-    """
-    Build a single select list with clear labels, e.g.
-      'bundled · 030.cmeth' or 'external · mycohort.cmeth'
-    Returns list of (label, path).
-    """
     rows: List[Tuple[str, Path]] = []
     for _k, p in sorted(bundled.items(), key=lambda kv: kv[0].lower()):
         rows.append((f"{bundled_tag} · {p.name}", p))
-    for p in sorted(
-        (Path(x) for x in external), key=lambda pp: pp.name.lower()
-    ):
+
+    # filter stale external paths
+    ext_paths: list[Path] = []
+    for x in external:
+        try:
+            p = Path(x)
+            if p.exists():
+                ext_paths.append(p)
+        except Exception:
+            continue
+
+    for p in sorted(ext_paths, key=lambda pp: pp.name.lower()):
         rows.append((f"{external_tag} · {p.name}", p))
     return rows
 
@@ -116,14 +115,12 @@ def _diagnose_hap_coverage(parts: Dict[str, Path], kit_args: List[str]) -> str:
     """
     Quick diagnostic when hap-plot fails: check if hap1/hap2 have any finite
     methylation values across the chosen intervals.
-    Returns a small text table as a string.
     """
-    # resolve intervals from kit_args (either --kit ID or --bed /path)
-    if kit_args[0] == "--kit":
-        bed_id = kit_args[1]
-    else:
-        bed_id = Path(kit_args[1])
     try:
+        if kit_args[0] == "--kit":
+            bed_id = kit_args[1]
+        else:
+            bed_id = Path(kit_args[1])
         intervals, region_names = load_intervals(bed_id)
     except Exception as e:
         return f"Failed to load intervals for diagnostics: {e}"
@@ -141,9 +138,7 @@ def _diagnose_hap_coverage(parts: Dict[str, Path], kit_args: List[str]) -> str:
         return "No hap1/hap2 files available to diagnose."
 
     try:
-        levels = Methylation.get_levels(
-            paths, intervals
-        )  # shape: (n_files, n_regions)
+        levels = Methylation.get_levels(paths, intervals)
     except Exception as e:
         return f"Failed to compute methylation levels for diagnostics: {e}"
 
@@ -152,7 +147,7 @@ def _diagnose_hap_coverage(parts: Dict[str, Path], kit_args: List[str]) -> str:
         vals = levels[i]
         finite = np.isfinite(vals)
         lines.append(f"  {lab}: {finite.sum()} / {finite.size} regions finite")
-    # show a few region names with no finite values for quick insight
+
     idx_all_nan = np.where(~np.isfinite(levels).any(axis=0))[0].tolist()
     if idx_all_nan:
         preview = ", ".join(region_names[j] for j in idx_all_nan[:10])
@@ -164,12 +159,11 @@ def _diagnose_hap_coverage(parts: Dict[str, Path], kit_args: List[str]) -> str:
 
 
 # ────────────────────────────────────────────────────────────────────
-# reference + regions (single selectors with labeled entries)
+# reference + regions
 # ────────────────────────────────────────────────────────────────────
 left, right = st.columns([0.6, 0.4], gap="large")
 
 with left:
-    # references: bundled (default) + external
     bundled_refs = list_bundled_refs()
     ref_choices = _make_grouped_choices(
         bundled_refs, cmeth_files, "bundled", "external"
@@ -178,17 +172,15 @@ with left:
         st.error("No references available (bundled or external).")
         st.stop()
 
-    ref_label_default, ref_path_default = ref_choices[0]
     ref_label = st.selectbox(
         "reference (.cmeth)",
         options=[lbl for lbl, _ in ref_choices],
         index=0,
-        help="Bundled references are shipped with the package; external can be set on home page.",
+        key="an_ref_label",
+        help="Bundled references ship with the package; external refs come from Home page folder scan.",
     )
-    # map selected label back to path
     cm_ref_path = dict(ref_choices)[ref_label]
 
-    # parse mode (safe)
     try:
         _, meta = read_cmeth(Path(cm_ref_path))
         ref_mode = str(meta.get("mode", "aggregated")).lower()
@@ -198,34 +190,50 @@ with left:
 
     # regions: bundled kits + custom beds
     builtin_kits = list_builtin_kits()
-    custom_beds = st.session_state.get("custom_beds", [])
-    # Build a single choice list
-    bed_choices: List[Tuple[str, str | Path]] = []
+    custom_beds = st.session_state.setdefault("custom_beds", [])
+
+    # filter stale custom beds
+    ext_beds: list[Path] = []
+    for x in custom_beds:
+        try:
+            p = Path(x)
+            if p.exists():
+                ext_beds.append(p)
+        except Exception:
+            continue
+
+    bed_choices: List[Tuple[str, Tuple[str, str]]] = []
     for k in sorted(builtin_kits.keys()):
         bed_choices.append((f"bundled kit · {k}", ("--kit", k)))
-    for b in sorted(
-        (Path(x) for x in custom_beds), key=lambda pp: pp.name.lower()
-    ):
-        bed_choices.append((f"external BED · {b.name}", ("--bed", b)))
+    for b in sorted(ext_beds, key=lambda pp: pp.name.lower()):
+        bed_choices.append((f"external BED · {b.name}", ("--bed", str(b))))
 
     if not bed_choices:
         st.error("No region definitions found (bundled kits or custom BEDs).")
         st.stop()
 
+    # choose default kit if present
+    default_kit = (st.session_state.get("default_kit") or "ME030").strip()
+    default_label = f"bundled kit · {default_kit}"
+    labels_only = [lbl for lbl, _ in bed_choices]
+    default_index = labels_only.index(default_label) if default_label in labels_only else 0
+
     bed_label = st.selectbox(
         "regions",
-        options=[lbl for lbl, _ in bed_choices],
-        index=0,
-        help="Choose a bundled MLPA kit or a discovered custom BED (set on home page).",
+        options=labels_only,
+        index=default_index,
+        key="an_regions_label",
+        help="Choose a bundled MLPA kit or a discovered custom BED (set on Home page).",
     )
     selected_flag, selected_val = dict(bed_choices)[bed_label]
-    # turn into CLI args
     kit_args: List[str] = [selected_flag, str(selected_val)]
     region_label = bed_label.split("·", 1)[1].strip()
 
 with right:
     st.markdown(
-        f"**reference:** `{Path(cm_ref_path).name}`  \n**mode:** `{ref_mode}`  \n**regions:** `{region_label}`"
+        f"**reference:** `{Path(cm_ref_path).name}`  \n"
+        f"**mode:** `{ref_mode}`  \n"
+        f"**regions:** `{region_label}`"
     )
 
 st.divider()
@@ -237,6 +245,9 @@ st.subheader("targets")
 
 up_col, pick_col = st.columns([0.55, 0.45], gap="large")
 
+upload_dir = out_dir / "uploads"
+upload_dir.mkdir(parents=True, exist_ok=True)
+
 with up_col:
     st.markdown("**upload bedMethyl**", help="Upload .bedmethyl.gz (+ .tbi).")
     uploads = st.file_uploader(
@@ -244,12 +255,12 @@ with up_col:
         type=["gz", "tbi"],
         accept_multiple_files=True,
         help="For each .bedmethyl.gz a matching .tbi is recommended.",
+        key="an_uploads",
     )
-    uploaded_map: Dict[str, Dict[str, Path]] = {}
     if uploads:
-        up_dir = out_dir / "uploads"
-        _ = _save_uploads(uploads, up_dir)
-        uploaded_map = scan_bedmethyl(up_dir)
+        _save_uploads(uploads, upload_dir)
+
+uploaded_map: Dict[str, Dict[str, Path]] = scan_bedmethyl(upload_dir)
 
 with pick_col:
     bed_by_sample: Dict[str, Dict[str, Path]] = _combine_bed_maps(
@@ -257,7 +268,7 @@ with pick_col:
     )
     if not bed_by_sample:
         st.warning(
-            "No bgzipped & indexed bedmethyl files found - set paths on home or upload above."
+            "No bgzipped & indexed bedmethyl files found — set paths on Home or upload above."
         )
         st.stop()
 
@@ -265,13 +276,14 @@ with pick_col:
     picked = st.multiselect(
         "target samples",
         sample_ids,
+        key="an_targets",
         help="For haplotype series, pick exactly one sample with both _1 and _2.",
     )
 
 st.divider()
 
 # ────────────────────────────────────────────────────────────────────
-# methylation – pooled and hap-aware series
+# methylation
 # ────────────────────────────────────────────────────────────────────
 st.subheader("methylation")
 
@@ -279,27 +291,29 @@ mode_choice = st.radio(
     "plot mode",
     options=["Pooled only", "Haplotype series (pooled + hap1 + hap2)"],
     index=0,
+    key="an_meth_mode",
 )
 
 mcol1, mcol2 = st.columns([0.5, 0.5], gap="large")
 with mcol1:
     meth_pooled_png = st.text_input(
-        "pooled output", value="methylation_pooled.png"
+        "pooled output", value="methylation_pooled.png", key="an_meth_pooled_name"
     )
 with mcol2:
-    meth_h1_png = st.text_input("hap1 output", value="methylation_hap1.png")
-    meth_h2_png = st.text_input("hap2 output", value="methylation_hap2.png")
+    meth_h1_png = st.text_input(
+        "hap1 output", value="methylation_hap1.png", key="an_meth_h1_name"
+    )
+    meth_h2_png = st.text_input(
+        "hap2 output", value="methylation_hap2.png", key="an_meth_h2_name"
+    )
 
-go_meth = st.button(
-    "plot methylation", type="primary", use_container_width=True
-)
+go_meth = st.button("plot methylation", type="primary", use_container_width=True)
 
 if go_meth:
     if not picked:
         st.error("Select at least one target sample.")
         st.stop()
 
-    # pooled plot
     pooled_argv = [
         "methylation",
         "--cmeth",
@@ -322,11 +336,7 @@ if go_meth:
 
     if code == 0 and out_png.exists():
         st.success(f"Pooled figure → {out_png}")
-        st.image(
-            str(out_png),
-            use_container_width=True,
-            caption="Methylation (pooled)",
-        )
+        st.image(str(out_png), use_container_width=True, caption="Methylation (pooled)")
         st.download_button(
             "download pooled PNG",
             data=out_png.read_bytes(),
@@ -335,22 +345,22 @@ if go_meth:
         )
     else:
         st.error(f"Pooled methylation plotting failed (exit {code})")
+
     if stdout.strip():
         with st.expander("pooled – CLI stdout/stderr", expanded=False):
             st.code(stdout, language="bash")
 
-    # hap series
     if mode_choice.startswith("Haplotype"):
         if len(picked) != 1:
             st.error("Haplotype series requires exactly **one** target sample.")
             st.stop()
+
         sid = picked[0]
         parts = bed_by_sample.get(sid, {})
         if not (parts.get("1") and parts.get("2")):
             st.error(f"Sample `{sid}` is missing either `_1` or `_2` file.")
             st.stop()
 
-        # hap1
         h1_argv = [
             "methylation",
             "--cmeth",
@@ -367,8 +377,8 @@ if go_meth:
         ]
         with st.expander("hap1 – CLI argv", expanded=True):
             st.code(" ".join(map(str, h1_argv)), language="bash")
-        code1, out_h1, stdout1 = _cli_plot(h1_argv)
 
+        code1, out_h1, stdout1 = _cli_plot(h1_argv)
         if code1 == 0 and out_h1.exists():
             st.success(f"Hap1 plot → {out_h1}")
             st.image(str(out_h1), use_container_width=True)
@@ -383,11 +393,11 @@ if go_meth:
             diag = _diagnose_hap_coverage(parts, kit_args)
             with st.expander("hap1 – diagnostics", expanded=True):
                 st.code(diag, language="text")
+
         if stdout1.strip():
             with st.expander("hap1 – CLI stdout/stderr", expanded=False):
                 st.code(stdout1, language="bash")
 
-        # hap2
         h2_argv = [
             "methylation",
             "--cmeth",
@@ -404,8 +414,8 @@ if go_meth:
         ]
         with st.expander("hap2 – CLI argv", expanded=True):
             st.code(" ".join(map(str, h2_argv)), language="bash")
-        code2, out_h2, stdout2 = _cli_plot(h2_argv)
 
+        code2, out_h2, stdout2 = _cli_plot(h2_argv)
         if code2 == 0 and out_h2.exists():
             st.success(f"Hap2 plot → {out_h2}")
             st.image(str(out_h2), use_container_width=True)
@@ -420,6 +430,7 @@ if go_meth:
             diag = _diagnose_hap_coverage(parts, kit_args)
             with st.expander("hap2 – diagnostics", expanded=True):
                 st.code(diag, language="text")
+
         if stdout2.strip():
             with st.expander("hap2 – CLI stdout/stderr", expanded=False):
                 st.code(stdout2, language="bash")
@@ -436,12 +447,10 @@ with c1:
     st.caption("Supports full and aggregated references.")
 with c2:
     cn_png = st.text_input(
-        "copy-number output", value="copy_number.png", key="cn_png_name"
+        "copy-number output", value="copy_number.png", key="an_cn_png_name"
     )
 
-go_cn = st.button(
-    "plot copy number", type="secondary", use_container_width=True
-)
+go_cn = st.button("plot copy number", type="secondary", use_container_width=True)
 
 if go_cn:
     if not picked:
@@ -466,9 +475,8 @@ if go_cn:
     with st.expander("copy-number – CLI argv", expanded=False):
         st.code(" ".join(map(str, argv)), language="bash")
 
-    res = CliRunner().invoke(plot_group, argv, catch_exceptions=True)
-    out_png = out_dir / cn_png
-    if res.exit_code == 0 and out_png.exists():
+    code, out_png, stdout = _cli_plot(argv)
+    if code == 0 and out_png.exists():
         st.success(f"Figure → {out_png}")
         st.image(
             str(out_png),
@@ -482,13 +490,8 @@ if go_cn:
             mime="image/png",
         )
     else:
-        st.error(f"Copy-number plotting failed (exit {res.exit_code})")
-    if res.output.strip():
-        with st.expander("copy number – CLI stdout/stderr"):
-            st.code(res.output, language="bash")
-    if res.exception:
-        with st.expander("traceback"):
-            st.code(
-                "".join(traceback.format_exception(res.exception)),
-                language="python",
-            )
+        st.error(f"Copy-number plotting failed (exit {code})")
+
+    if stdout.strip():
+        with st.expander("copy number – CLI stdout/stderr", expanded=False):
+            st.code(stdout, language="bash")

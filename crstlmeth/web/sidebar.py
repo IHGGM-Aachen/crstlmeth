@@ -24,8 +24,7 @@ def _fmt_path(p: str | None) -> str:
 def render_sidebar() -> None:
     """Draw a compact overview from session_state (no side effects)."""
     # stable session id
-    if "session_id" not in st.session_state:
-        st.session_state.session_id = uuid.uuid4().hex[:8]
+    session_id = st.session_state.get("session_id", "")
 
     bed_by_sample = st.session_state.get("bed_by_sample", {}) or {}
     cmeth_files = st.session_state.get("cmeth_files", []) or []
@@ -90,4 +89,6 @@ def render_sidebar() -> None:
     )
 
     st.sidebar.divider()
-    st.sidebar.markdown(f"*session id: `{st.session_state.session_id}`*")
+    st.sidebar.markdown(
+    f"*session id: `{session_id}`*" if session_id else "*session id: (unset)*"
+)
