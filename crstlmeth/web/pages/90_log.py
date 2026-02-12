@@ -18,7 +18,9 @@ from crstlmeth.web.state import ensure_web_state
 # ────────────────────────────────────────────────────────────────────
 # page setup
 # ────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="crstlmeth - log", page_icon=":material/bug_report:")
+st.set_page_config(
+    page_title="crstlmeth - log", page_icon=":material/bug_report:"
+)
 
 ensure_web_state()
 
@@ -48,7 +50,16 @@ if not log_path.exists():
 # ────────────────────────────────────────────────────────────────────
 # load TSV
 # ────────────────────────────────────────────────────────────────────
-COLS = ["ts", "level", "session", "event", "cmd", "parameters", "message", "runtime"]
+COLS = [
+    "ts",
+    "level",
+    "session",
+    "event",
+    "cmd",
+    "parameters",
+    "message",
+    "runtime",
+]
 
 try:
     df = pd.read_csv(

@@ -10,10 +10,9 @@ import os
 import shutil
 import subprocess
 from datetime import datetime
+from importlib.resources import files as rfiles
 from pathlib import Path
 from typing import Dict, Optional
-
-from importlib.resources import files as rfiles
 
 
 # ── misc helpers ─────────────────────────────────────────────────────

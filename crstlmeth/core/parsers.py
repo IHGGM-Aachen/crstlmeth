@@ -64,18 +64,91 @@ def query_bedmethyl(
 
 
 def get_region_stats(
-    filepath: str, chrom: str, start: int, end: int
+    filepath: str,
+    chrom: str,
+    start: int,
+    end: int,
+    *,
+    mode: str = "m",
+    codes: list[str] | tuple[str, ...] | None = None,
+    group_by_strand: bool = False,
 ) -> tuple[int, int]:
-    df = query_bedmethyl(filepath, chrom, start, end)
+    """
+    Compute (sum_mod, sum_valid) for a genomic interval from a modkit bedmethyl file.
+
+    This function first tabix-queries the interval, then collapses per-locus so that
+    the denominator (Nvalid_cov) is only counted once per locus, while the numerator
+    (Nmod) can be summed across one or more mod codes.
+
+    Parameters
+    ----------
+    filepath
+        bgzipped + tabix-indexed modkit bedmethyl (.gz + .tbi)
+    chrom, start, end
+        interval [start, end) (0-based, end-exclusive)
+    mode
+        Convenience selector for which mod codes to count in the numerator.
+        Supported:
+          - "m"   : count only 5mC calls (mod_code == "m")
+          - "h"   : count only 5hmC calls (mod_code == "h")
+          - "mh" : count 5mC + 5hmC (mod_code in {"m","h"})
+          - "any"      : count all codes present in the file (no filtering)
+          - "custom"   : use the explicit `codes=` list/tuple
+    codes
+        Explicit mod codes to include when mode="custom".
+        Example: codes=["m"] or codes=["m","h"].
+    group_by_strand
+        If True, treat (+) and (-) as distinct loci when collapsing.
+        If False (default), collapse by (chrom,start,end) only.
+
+        For CpG methylation files, False is usually the safer default to avoid
+        accidentally double-counting the same CpG if both strands appear.
+
+    Returns
+    -------
+    (sum_mod, sum_valid)
+        sum_mod   = summed Nmod after filtering + collapsing
+        sum_valid = summed Nvalid_cov after collapsing
+    """
+    # chrom,start,end,mod_code,strand,Nvalid_cov,Nmod
+    df = query_bedmethyl(filepath, chrom, start, end)  # type: ignore[name-defined]
     if df.empty:
         return (0, 0)
 
-    # If you want "any modification of this base": sum Nmod across codes,
-    # but take ONE Nvalid_cov per locus (+strand)
-    grp = df.groupby(["chrom", "start", "end", "strand"], as_index=False).agg(
+    # --- choose codes to include ---
+    if mode == "m":
+        df = df[df["mod_code"] == "m"]
+    elif mode == "h":
+        df = df[df["mod_code"] == "h"]
+    elif mode == "m":
+        df = df[df["mod_code"].isin(["m", "h"])]
+    elif mode == "any":
+        pass
+    elif mode == "custom":
+        if not codes:
+            raise ValueError(
+                "mode='custom' requires a non-empty `codes=` list/tuple"
+            )
+        df = df[df["mod_code"].isin(list(codes))]
+    else:
+        raise ValueError(
+            f"unknown mode={mode!r}. Expected one of "
+            "{'m_only','h_only','m_plus_h','any','custom'}."
+        )
+
+    if df.empty:
+        return (0, 0)
+
+    # --- collapse per locus: take ONE Nvalid_cov, sum Nmod across selected codes ---
+    keys = ["chrom", "start", "end"]
+    if group_by_strand:
+        keys.append("strand")
+
+    grp = df.groupby(keys, as_index=False).agg(
         Nvalid_cov=("Nvalid_cov", "max"),  # one denominator per locus
-        Nmod=("Nmod", "sum"),  # sum across mod codes
+        Nmod=("Nmod", "sum"),  # sum numerator across codes kept above
     )
+
     return int(grp["Nmod"].sum()), int(grp["Nvalid_cov"].sum())
 
 

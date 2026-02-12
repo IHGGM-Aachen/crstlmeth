@@ -10,7 +10,11 @@ from pathlib import Path
 
 import streamlit as st
 
-from crstlmeth.core.discovery import scan_bedmethyl, scan_cmeth, scan_region_beds
+from crstlmeth.core.discovery import (
+    scan_bedmethyl,
+    scan_cmeth,
+    scan_region_beds,
+)
 from crstlmeth.web.sidebar import render_sidebar
 from crstlmeth.web.state import ensure_web_state
 
@@ -20,6 +24,7 @@ from crstlmeth.web.state import ensure_web_state
 st.set_page_config(page_title="crstlmeth", page_icon=":material/home:")
 
 ensure_web_state()
+
 
 # ────────────────────────────────────────────────────────────────────
 # scan helpers
@@ -41,9 +46,12 @@ def _scan() -> None:
 
     with st.spinner("scanning folders …"):
         bed_by_sample = scan_bedmethyl(data_path) if data_path else {}
-        cmeth_files = [str(p) for p in (scan_cmeth(ref_path) if ref_path else [])]
+        cmeth_files = [
+            str(p) for p in (scan_cmeth(ref_path) if ref_path else [])
+        ]
         custom_beds = [
-            str(p) for p in (scan_region_beds(region_path) if region_path else [])
+            str(p)
+            for p in (scan_region_beds(region_path) if region_path else [])
         ]
 
     st.session_state["bed_by_sample"] = bed_by_sample
@@ -82,7 +90,9 @@ st.divider()
 # folder selectors (persisted in session_state)
 # ────────────────────────────────────────────────────────────────────
 with st.container(border=True):
-    st.subheader("folders", help="set input folders; click scan to update the dashboard")
+    st.subheader(
+        "folders", help="set input folders; click scan to update the dashboard"
+    )
 
     c1, c2 = st.columns([1, 1], gap="large")
     c3 = st.columns([1])[0]
@@ -106,7 +116,9 @@ with st.container(border=True):
             help="optional folder with extra *.bed defining intervals",
         )
 
-    scan_clicked = st.button("scan folders", type="primary", use_container_width=True)
+    scan_clicked = st.button(
+        "scan folders", type="primary", use_container_width=True
+    )
 
 # ────────────────────────────────────────────────────────────────────
 # auto-scan once when config prefilled paths
@@ -144,6 +156,7 @@ render_sidebar()
 bed_by_sample = st.session_state.setdefault("bed_by_sample", {})
 cmeth_files = st.session_state.setdefault("cmeth_files", [])
 custom_beds = st.session_state.setdefault("custom_beds", [])
+
 
 # ────────────────────────────────────────────────────────────────────
 # counts + dashboard
@@ -189,11 +202,15 @@ r1c1, r1c2, r1c3 = st.columns([1, 1, 1], gap="large")
 with r1c1:
     box = st.container(border=True)
     box.metric("haplotype-resolved", f"{n_hap_resolved}")
-    box.caption("samples with both hap1 and hap2", help="ungrouped may be missing")
+    box.caption(
+        "samples with both hap1 and hap2", help="ungrouped may be missing"
+    )
 with r1c2:
     box = st.container(border=True)
     box.metric("pooled-only", f"{n_pooled_only}")
-    box.caption("missing either hap1 or hap2", help="treated as pooled for analysis")
+    box.caption(
+        "missing either hap1 or hap2", help="treated as pooled for analysis"
+    )
 with r1c3:
     box = st.container(border=True)
     box.metric("bedmethyl files", f"{n_bed_files}")
@@ -201,7 +218,9 @@ with r1c3:
 
 with st.container(border=True):
     st.metric("cmeth references", f"{n_cmeth}")
-    st.caption("full or aggregated .cmeth", help="set 'cmeth reference folder' above")
+    st.caption(
+        "full or aggregated .cmeth", help="set 'cmeth reference folder' above"
+    )
 
 with st.container(border=True):
     st.metric("custom region beds", f"{n_beds}")

@@ -1,0 +1,14 @@
+# crstlmeth.toml
+
+[paths]
+data_dir = "crstlmeth/data/affected"
+out_dir = "crstlmeth/output"
+refs_dir = "crstlmeth/output"
+regions_dir = "crstlmeth/output"
+tabix = "tabix"
+
+[defaults]
+kit = "ME030"
+
+[web]
+port = 8501

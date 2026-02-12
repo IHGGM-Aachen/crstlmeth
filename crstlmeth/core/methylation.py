@@ -8,7 +8,8 @@ from bedmethyl files over a defined set of intervals
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -18,16 +19,9 @@ from .stats import one_sample_z_test
 
 
 class Methylation:
-    """
-    encapsulate methylation-level computations from .bedmethyl.gz inputs
-    """
-
-    # ────────────────────────────────────────────────────────────────────
-    # pooled levels
-    # ────────────────────────────────────────────────────────────────────
     @staticmethod
     def get_levels(
-        bedmethyl_files: list[str],
+        bedmethyl_files: list[str | Path],
         intervals: list[tuple[str, int, int]],
     ) -> np.ndarray:
         """
@@ -36,11 +30,11 @@ class Methylation:
         groups files by naive sample id (prefix before first underscore) and pools
         all parts (hap1/hap2/ungrouped) of each sample.
         """
+        # normalize Path -> str (get_region_stats expects strings)
+        bedmethyl_files = [str(p) for p in bedmethyl_files]
 
         def _sid(p: str) -> str:
-            import pathlib as _pl
-
-            return _pl.Path(p).name.split("_")[0]
+            return Path(p).name.split("_")[0]
 
         groups: dict[str, list[str]] = {}
         for p in bedmethyl_files:
@@ -55,7 +49,7 @@ class Methylation:
                 tot_m = 0
                 tot_v = 0
                 for path in paths:
-                    m, v = get_region_stats(path, chrom, start, end)
+                    m, v = get_region_stats(str(path), chrom, start, end)
                     tot_m += m
                     tot_v += v
                 levels[i, j] = (tot_m / tot_v) if tot_v > 0 else np.nan
@@ -67,13 +61,18 @@ class Methylation:
     # ────────────────────────────────────────────────────────────────────
     @staticmethod
     def get_levels_by_haplotype(
-        hap_paths: dict[str, str],  # keys "1","2","ungrouped" (any subset)
+        hap_paths: Mapping[
+            str, str | Path
+        ],  # keys "1","2","ungrouped" (any subset)
         intervals: list[tuple[str, int, int]],
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         returns three arrays of shape (n_intervals,):
             hap1_levels, hap2_levels, overall_levels
         """
+        # normalize values to str
+        hap_paths = {k: str(v) for k, v in hap_paths.items()}
+
         m1 = np.zeros(len(intervals))
         v1 = np.zeros(len(intervals))
         m2 = np.zeros(len(intervals))

@@ -8,13 +8,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import click
-
-import os
 
 __all__ = ["get_logger", "get_logger_from_cli", "log_event"]
 

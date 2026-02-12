@@ -39,9 +39,7 @@ from crstlmeth.core.references import (
 )
 @click.option(
     "--mode",
-    type=click.Choice(
-        ["aggregated", "truncated", "full"], case_sensitive=False
-    ),
+    type=click.Choice(["aggregated", "full"], case_sensitive=False),
     default="aggregated",
     show_default=True,
     help="Reference format: 'aggregated' (quantiles; shareable) or 'full' (per-sample; plot-ready).",
@@ -67,8 +65,6 @@ def create(
 
     out_path = Path(out_file).resolve()
     mode_norm = mode.lower()
-    if mode_norm == "truncated":
-        mode_norm = "aggregated"  # accept legacy spelling
 
     try:
         if mode_norm == "aggregated":
@@ -102,7 +98,7 @@ def create(
     except Exception as exc:
         log_event(
             logger,
-            level=40,  # logging.ERROR
+            level=40,
             event="reference-create",
             cmd="reference.create",
             params={

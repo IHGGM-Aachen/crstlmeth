@@ -1,10 +1,10 @@
 # crstlmeth/config/settings.py
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import os
 import tomllib
+from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)

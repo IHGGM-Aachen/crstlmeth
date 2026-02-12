@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Mapping
 
-import numpy as np
 import pandas as pd
 
 # ────────────────────────────────────────────────────────────────────
@@ -45,8 +44,11 @@ def _md5(path: Path, chunk: int = 1 << 20) -> str:
 
 def _read_header_lines(path: Path) -> tuple[list[str], str]:
     """
-    extract header lines and body text from a .cmeth file
-    returns (list_of_header_lines, tsv_body_string)
+    Extract header lines and body text from a .cmeth file.
+
+    Returns
+    -------
+    list_of_header_lines, tsv_body_string
     """
     lines: List[str] = []
     with path.open() as fh:
@@ -162,7 +164,7 @@ def _v01_spec() -> VersionSpec:
     aggregated = ModeSpec(
         name="aggregated",
         sections={"meth": meth, "cn": cn},
-        required_header=("k_min", "cn_norm"),  # and optional bins*
+        required_header=("k_min", "cn_norm"),
     )
 
     # full v0.1
@@ -202,51 +204,43 @@ class CMethFile:
 
     # ---- section utilities ---------------------------------------------------
     def has_section_column(self) -> bool:
+        """
+        Return True if the dataframe has a 'section' column.
+        """
         return "section" in self.df.columns
 
     def infer_section(self) -> pd.Series:
         """
-        v0.1 compatibility: infer "meth" / "cn" if section not present.
+        Return the section labels as a string Series.
+
+        In aggregated mode the 'section' column is required.
         """
-        if self.has_section_column():
-            return self.df["section"]
-
-        sec = pd.Series(
-            ["unknown"] * len(self.df), index=self.df.index, dtype=object
-        )
-        cols = set(self.df.columns)
-
-        # meth: presence of hap_key and meth_* columns
-        if {"hap_key", "meth_median", "meth_q25", "meth_q75"} <= cols:
-            mask = self.df["hap_key"].notna()
-            sec.loc[mask] = "meth"
-
-        # cn: metric==cn or presence of ratio_*_log2
-        if "metric" in cols:
-            m = self.df["metric"].astype(str).str.lower() == "cn"
-            sec.loc[m] = "cn"
-        ratio_cols = {"ratio_median_log2", "ratio_q25_log2", "ratio_q75_log2"}
-        if ratio_cols <= cols:
-            sec.loc[:] = np.where(ratio_cols <= cols, "cn", sec)
-
-        return sec
+        if not self.has_section_column():
+            raise ValueError(
+                "aggregated .cmeth files require a 'section' column "
+                "with values such as 'meth' or 'cn'."
+            )
+        return self.df["section"].astype(str)
 
     def split_sections(self) -> dict[str, pd.DataFrame]:
         """
-        return {section: dataframe} for aggregated; for full returns {"full": df}
+        Return {section: dataframe} for aggregated mode; for full mode, return
+        a single entry {'full': df}.
         """
         if self.mode != "aggregated":
             return {"full": self.df.copy()}
+
         sec = self.infer_section()
         out: dict[str, pd.DataFrame] = {}
-        for name in sorted(sec.unique()):
-            if name == "unknown":
-                continue
-            out[name] = self.df.loc[sec == name].copy()
+        for sname, block in self.df.groupby(sec):
+            out[str(sname)] = block.copy()
         return out
 
     # ---- validation ----------------------------------------------------------
     def validate(self) -> None:
+        """
+        Validate header keys and table schema against the versioned specification.
+        """
         spec = get_version_spec(self.version)
         mode_spec = spec.modes.get(self.mode)
         if mode_spec is None:
@@ -257,8 +251,8 @@ class CMethFile:
             if k not in self.meta:
                 raise ValueError(f"missing header key: {k!r}")
 
+        # full mode: per-sample schema
         if mode_spec.sections is None:
-            # full mode: per-sample schema
             req = {
                 "sample_id",
                 "region",
@@ -276,7 +270,23 @@ class CMethFile:
                 raise ValueError(f"missing full columns: {sorted(missing)}")
             return
 
-        # aggregated mode: check each present section block
+        # aggregated mode: explicit 'section' column and section-wise checks
+        if "section" not in self.df.columns:
+            raise ValueError(
+                "aggregated .cmeth files require a 'section' column "
+                f"with values in {sorted(mode_spec.sections.keys())!r}"
+            )
+
+        valid_sections = set(mode_spec.sections.keys())
+        sec_values = set(self.df["section"].astype(str).unique())
+        unknown = sec_values - valid_sections
+        if unknown:
+            raise ValueError(
+                "aggregated .cmeth: unknown section values "
+                f"{sorted(unknown)}; expected subset of "
+                f"{sorted(valid_sections)}"
+            )
+
         sec = self.split_sections()
         for sname, block in sec.items():
             s = mode_spec.sections.get(sname)
@@ -354,7 +364,6 @@ class CMethFile:
             dfc = cn_df.copy()
             if "section" not in dfc.columns:
                 dfc.insert(0, "section", "cn")
-            # allow legacy "metric"=cn to remain
             parts.append(dfc)
 
         df = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()

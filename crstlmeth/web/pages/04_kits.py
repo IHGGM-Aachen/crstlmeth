@@ -37,6 +37,7 @@ default_kit: str = (st.session_state.get("default_kit") or "ME030").strip()
 # discoveries
 custom_beds: list[str] = st.session_state.setdefault("custom_beds", [])
 
+
 def _existing_paths(xs: list[str]) -> list[Path]:
     out: list[Path] = []
     for x in xs:
@@ -48,20 +49,26 @@ def _existing_paths(xs: list[str]) -> list[Path]:
             continue
     return out
 
+
 # build choices are bundled kits and discovered beds and upload
 kits = list_builtin_kits()
 ext_beds = _existing_paths(custom_beds)
 
 choices: list[str] = []
 choices += [f"bundled kit · {k}" for k in sorted(kits.keys())]
-choices += [f"external BED · {p.name}" for p in sorted(ext_beds, key=lambda pp: pp.name.lower())]
+choices += [
+    f"external BED · {p.name}"
+    for p in sorted(ext_beds, key=lambda pp: pp.name.lower())
+]
 choices += ["upload BED …"]
 
 # default selection
 default_label = f"bundled kit · {default_kit}"
 default_index = choices.index(default_label) if default_label in choices else 0
 
-choice = st.selectbox("kit / BED", choices, index=default_index, key="kits_choice")
+choice = st.selectbox(
+    "kit / BED", choices, index=default_index, key="kits_choice"
+)
 
 # resolve selection into a bed identifier usable by load_intervals
 kit_label: str

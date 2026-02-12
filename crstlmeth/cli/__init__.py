@@ -72,6 +72,7 @@ cli.add_command(reference)
 cli.add_command(calculate)
 cli.add_command(plot)
 
+
 @cli.command("web", help="launch the streamlit gui")
 @click.option(
     "-c",

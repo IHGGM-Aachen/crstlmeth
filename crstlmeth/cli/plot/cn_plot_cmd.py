@@ -1,9 +1,10 @@
-# crstlmeth/cli/plot/cn_plot_cmd.py
-#
-# redraw a copy-number plot from:
-#   - one *.cmeth reference cohort (mode=full or mode=aggregated)
-#   - one or more target bedmethyl files (resolved automatically)
+"""
+crstlmeth/cli/plot/cn_plot_cmd.py
 
+redraw a copy-number plot from:
+  - one *.cmeth reference cohort (mode=full or mode=aggregated)
+  - one or more target bedmethyl files (resolved automatically)
+"""
 
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ def _first_occurrence_selector(
     all_regions: List[str], unique_regions: List[str]
 ) -> List[int]:
     """
-    Return indices into all_regions picking the FIRST occurrence for each name in unique_regions.
+    Return indices into all_regions picking the first occurrence for each name in unique_regions.
     """
     first_idx: Dict[str, int] = {}
     for i, r in enumerate(all_regions):
@@ -68,6 +69,7 @@ def _first_occurrence_selector(
 )
 @click.option(
     "--kit",
+    "--bed",
     "kit_or_bed",
     required=True,
     help="mlpa kit name or custom bed defining cn regions",
@@ -95,14 +97,13 @@ def copynumber(
     out_png: Path,
 ) -> None:
     """
-    produce out_png showing cohort distribution and target log2 ratios
+    Produce out_png showing cohort distribution and target log2 ratios.
     """
     logger = get_logger_from_cli(ctx)
 
     # resolve target bedmethyl files
     tgt_paths: List[Path] = []
     for t in target:
-        # discovery helper expects a sequence of patterns
         tgt_paths.extend(resolve_bedmethyl_glob([str(t)]))
     if not tgt_paths:
         raise click.UsageError("no target bedmethyl files resolved")
@@ -117,12 +118,16 @@ def copynumber(
     # load reference
     ref_df, meta = read_cmeth(cmeth_ref, logger=logger)
     mode = str(meta.get("mode", "full")).lower()
+    if mode not in {"aggregated", "full"}:
+        raise click.ClickException(
+            f"{cmeth_ref.name}: unsupported reference mode {mode!r} "
+            "(expected 'aggregated' or 'full')"
+        )
 
-    # build optional QC mask (frac ungrouped ≥ 45%) from a single target with hap parts
+    # optional phasing QC mask (from a single target with hap-part files)
     qc_mask = None
     qc_note = None
 
-    # group by sample (similar to methylation CLI)
     def _group_paths_by_sample(paths: List[str]) -> Dict[str, List[str]]:
         out: Dict[str, List[str]] = {}
         from pathlib import Path as _P
@@ -156,11 +161,21 @@ def copynumber(
             qc_mask = qc.get("flag_mask", None)
             qc_note = "QC: frac ungrouped ≥ 45%"
 
+    # ──────────────────────────────────────────────────────────────
+    # Aggregated reference: both ref & targets use Nvalid counts
+    # ──────────────────────────────────────────────────────────────
     if mode == "aggregated":
-        # filter to CN section if present
         df = ref_df.copy()
-        if "section" in df.columns:
-            df = df[df["section"].astype(str) == "cn"]
+        if "section" not in df.columns:
+            raise click.ClickException(
+                f"{cmeth_ref.name}: aggregated CN reference requires a 'section' column "
+                "with rows marked as 'cn'"
+            )
+        df = df[df["section"].astype(str) == "cn"]
+        if df.empty:
+            raise click.ClickException(
+                f"{cmeth_ref.name}: no 'cn' section found in aggregated reference"
+            )
 
         if "region" not in df.columns:
             raise click.ClickException(
@@ -190,22 +205,29 @@ def copynumber(
                 f"{cmeth_ref.name}: missing CN quantiles in aggregated reference"
             )
 
-        # reindex to UNIQUE region list
         df = df.set_index("region")
         df = df[~df.index.duplicated(keep="first")]
         df = df.reindex(region_names_unique)
 
         q = df[list(colmap.keys())].rename(columns=colmap)
 
-        # compute target log2 under the recorded normalization recipe (ALL intervals first)
-        cn_norm = str(meta.get("cn_norm", "per-sample-median")).lower()
+        # cn_norm must be present in the header
+        try:
+            cn_norm = str(meta["cn_norm"]).lower()
+        except KeyError as exc:
+            raise click.ClickException(
+                f"{cmeth_ref.name}: aggregated reference missing required 'cn_norm' header"
+            ) from exc
+
+        # compute target log2 under the recorded normalization recipe
         tgt_log2, labels = CopyNumber.target_log2_for_aggregated(
             [str(p) for p in tgt_paths],
             intervals,
             cn_norm=cn_norm,
+            logger=logger,
         )
 
-        # align targets to UNIQUE region selection (first occurrences)
+        # align targets to unique region selection
         tgt_log2 = tgt_log2[:, sel_unique]
 
         plot_cn_from_quantiles(
@@ -219,15 +241,17 @@ def copynumber(
             qc_note=qc_note,
         )
 
+    # ──────────────────────────────────────────────────────────────
+    # Full reference: both ref & targets use depth_per_bp
+    # ──────────────────────────────────────────────────────────────
     elif mode == "full":
-        # expect per-sample pooled depth_per_bp rows
         pooled = ref_df[ref_df.get("hap", "pooled").astype(str) == "pooled"]
         if pooled.empty:
             raise click.ClickException(
                 f"{cmeth_ref.name}: no pooled rows in full reference"
             )
 
-        # build per-sample depth matrix in UNIQUE kit order
+        # reference depth_per_bp matrix: (n_ref_samples, n_regions)
         piv = pooled.pivot_table(
             index="sample_id", columns="region", values="depth_per_bp"
         )
@@ -241,9 +265,11 @@ def copynumber(
             dtype=float
         )
 
-        # cohort mean per region → ratios and log2
+        # cohort-mean normalisation per region
         mu = np.nanmean(ref_depth, axis=0)
         mu[~np.isfinite(mu)] = 1.0
+        mu[mu == 0] = 1.0
+
         ref_ratio = ref_depth / mu
         ref_log2 = np.log2(
             ref_ratio,
@@ -251,16 +277,19 @@ def copynumber(
             out=np.full_like(ref_ratio, np.nan),
         )
 
-        # target depth per bp, aligned to same UNIQUE columns
-        tgt_df = CopyNumber.bedmethyl_coverage(
-            [str(p) for p in tgt_paths], intervals, region_names
+        # IMPORTANT: target must use depth_per_bp as well (not raw counts)
+        tgt_df = CopyNumber.bedmethyl_depth_per_bp(
+            [str(p) for p in tgt_paths],
+            intervals,
+            region_names,
+            logger=logger,
         )
         tgt_piv = tgt_df.pivot_table(
-            index="sample_id", columns="region_name", values="coverage"
+            index="sample_id", columns="region_name", values="depth_per_bp"
         )
         tgt_depth = tgt_piv.reindex(columns=cols, fill_value=np.nan).to_numpy(
             dtype=float
-        )  # coverage ~ depth_per_bp proxy
+        )
 
         tgt_ratio = tgt_depth / mu
         tgt_log2 = np.log2(
@@ -268,6 +297,51 @@ def copynumber(
             where=np.isfinite(tgt_ratio),
             out=np.full_like(tgt_ratio, np.nan),
         )
+
+        # debug-ish summary in the TSV log so we can sanity-check scales
+        if logger is not None:
+            ref_flat = ref_log2[np.isfinite(ref_log2)]
+            tgt_flat = tgt_log2[np.isfinite(tgt_log2)]
+            ref_q = (
+                (
+                    float(np.nanpercentile(ref_flat, 5))
+                    if ref_flat.size
+                    else None
+                ),
+                (float(np.nanmedian(ref_flat)) if ref_flat.size else None),
+                (
+                    float(np.nanpercentile(ref_flat, 95))
+                    if ref_flat.size
+                    else None
+                ),
+            )
+            tgt_q = (
+                (
+                    float(np.nanpercentile(tgt_flat, 5))
+                    if tgt_flat.size
+                    else None
+                ),
+                (float(np.nanmedian(tgt_flat)) if tgt_flat.size else None),
+                (
+                    float(np.nanpercentile(tgt_flat, 95))
+                    if tgt_flat.size
+                    else None
+                ),
+            )
+
+            log_event(
+                logger,
+                event="cn-debug",
+                cmd="copynumber-full",
+                params=dict(
+                    n_ref_samples=int(ref_log2.shape[0]),
+                    n_targets=int(tgt_log2.shape[0]),
+                    n_regions=int(ref_log2.shape[1]),
+                    ref_log2_q5_med_q95=ref_q,
+                    tgt_log2_q5_med_q95=tgt_q,
+                ),
+                message="ref/target log2 summary",
+            )
 
         plot_cn_box_from_arrays(
             ref_log2=ref_log2,
@@ -285,12 +359,8 @@ def copynumber(
             qc_note=qc_note,
         )
 
-    else:
-        raise click.ClickException(f"unsupported cmeth mode: {mode!r}")
-
     click.echo(f"figure written -> {out_png.resolve()}")
 
-    # log
     log_event(
         logger,
         event="plot_copynumber",

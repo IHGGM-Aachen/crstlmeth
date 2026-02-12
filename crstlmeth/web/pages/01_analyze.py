@@ -42,7 +42,9 @@ session_id: str = st.session_state["session_id"]
 out_dir = resolve_outdir(session_id)
 
 # log file env (CLI sets this; fall back to local file)
-default_log = os.getenv("CRSTLMETH_LOGFILE") or str(Path.cwd() / "crstlmeth.log.tsv")
+default_log = os.getenv("CRSTLMETH_LOGFILE") or str(
+    Path.cwd() / "crstlmeth.log.tsv"
+)
 os.environ.setdefault("CRSTLMETH_LOGFILE", default_log)
 
 # session + discoveries
@@ -50,6 +52,7 @@ cmeth_files: list[str] = st.session_state.setdefault("cmeth_files", [])
 orig_bed_by_sample: Dict[str, Dict[str, Path]] = st.session_state.setdefault(
     "bed_by_sample", {}
 )
+
 
 # ────────────────────────────────────────────────────────────────────
 # helpers
@@ -113,9 +116,10 @@ def _make_grouped_choices(
 
 def _diagnose_hap_coverage(parts: Dict[str, Path], kit_args: List[str]) -> str:
     """
-    Quick diagnostic when hap-plot fails: check if hap1/hap2 have any finite
-    methylation values across the chosen intervals.
+    Quick diagnostic when hap-plot fails: check how many regions have finite
+    methylation values for hap1/hap2 (and overall pooled).
     """
+    # resolve intervals from kit_args (either --kit ID or --bed /path)
     try:
         if kit_args[0] == "--kit":
             bed_id = kit_args[1]
@@ -125,36 +129,56 @@ def _diagnose_hap_coverage(parts: Dict[str, Path], kit_args: List[str]) -> str:
     except Exception as e:
         return f"Failed to load intervals for diagnostics: {e}"
 
-    paths = []
-    labels = []
-    if parts.get("1"):
-        paths.append(parts["1"])
-        labels.append("hap1")
-    if parts.get("2"):
-        paths.append(parts["2"])
-        labels.append("hap2")
-
-    if not paths:
-        return "No hap1/hap2 files available to diagnose."
+    # keep only known keys and non-empty paths
+    hap_paths = {
+        k: v for k, v in parts.items() if k in ("1", "2", "ungrouped") and v
+    }
+    if not hap_paths:
+        return "No hap1/hap2/ungrouped files available to diagnose."
 
     try:
-        levels = Methylation.get_levels(paths, intervals)
+        h1, h2, overall = Methylation.get_levels_by_haplotype(
+            hap_paths, intervals
+        )
     except Exception as e:
         return f"Failed to compute methylation levels for diagnostics: {e}"
 
-    lines = ["diagnostic (finite values per hap across regions):"]
-    for i, lab in enumerate(labels):
-        vals = levels[i]
-        finite = np.isfinite(vals)
-        lines.append(f"  {lab}: {finite.sum()} / {finite.size} regions finite")
+    lines = ["diagnostic (finite values across regions):"]
 
-    idx_all_nan = np.where(~np.isfinite(levels).any(axis=0))[0].tolist()
+    if "1" in hap_paths:
+        finite1 = np.isfinite(h1)
+        lines.append(f"  hap1: {finite1.sum()} / {finite1.size} regions finite")
+    else:
+        finite1 = None
+        lines.append("  hap1: (missing)")
+
+    if "2" in hap_paths:
+        finite2 = np.isfinite(h2)
+        lines.append(f"  hap2: {finite2.sum()} / {finite2.size} regions finite")
+    else:
+        finite2 = None
+        lines.append("  hap2: (missing)")
+
+    finite_overall = np.isfinite(overall)
+    lines.append(
+        f"  overall (pooled): {finite_overall.sum()} / {finite_overall.size} regions finite"
+    )
+
+    # regions with no finite value in any available hap
+    no_finite = np.ones(len(region_names), dtype=bool)
+    if finite1 is not None:
+        no_finite &= ~finite1
+    if finite2 is not None:
+        no_finite &= ~finite2
+
+    idx_all_nan = np.where(no_finite)[0].tolist()
     if idx_all_nan:
         preview = ", ".join(region_names[j] for j in idx_all_nan[:10])
         more = " …" if len(idx_all_nan) > 10 else ""
         lines.append(
             f"  regions with no finite in any hap: {len(idx_all_nan)} ({preview}{more})"
         )
+
     return "\n".join(lines)
 
 
@@ -216,7 +240,9 @@ with left:
     default_kit = (st.session_state.get("default_kit") or "ME030").strip()
     default_label = f"bundled kit · {default_kit}"
     labels_only = [lbl for lbl, _ in bed_choices]
-    default_index = labels_only.index(default_label) if default_label in labels_only else 0
+    default_index = (
+        labels_only.index(default_label) if default_label in labels_only else 0
+    )
 
     bed_label = st.selectbox(
         "regions",
@@ -297,7 +323,9 @@ mode_choice = st.radio(
 mcol1, mcol2 = st.columns([0.5, 0.5], gap="large")
 with mcol1:
     meth_pooled_png = st.text_input(
-        "pooled output", value="methylation_pooled.png", key="an_meth_pooled_name"
+        "pooled output",
+        value="methylation_pooled.png",
+        key="an_meth_pooled_name",
     )
 with mcol2:
     meth_h1_png = st.text_input(
@@ -307,7 +335,11 @@ with mcol2:
         "hap2 output", value="methylation_hap2.png", key="an_meth_h2_name"
     )
 
-go_meth = st.button("plot methylation", type="primary", use_container_width=True)
+min_hap = st.slider("min hap regions", 1, 50, 10, 1, key="an_min_hap_regions")
+
+go_meth = st.button(
+    "plot methylation", type="primary", use_container_width=True
+)
 
 if go_meth:
     if not picked:
@@ -324,19 +356,27 @@ if go_meth:
     ]
     for sid in picked:
         parts = bed_by_sample.get(sid, {})
-        for key in ("1", "2", "ungrouped"):
-            p = parts.get(key)
-            if p:
-                pooled_argv.append(str(p))
+        # Prefer ungrouped if present; otherwise fall back to hap1+hap2.
+        if parts.get("ungrouped"):
+            pooled_argv.append(str(parts["ungrouped"]))
+        else:
+            for key in ("1", "2"):
+                p = parts.get(key)
+                if p:
+                    pooled_argv.append(str(p))
 
-    with st.expander("pooled – CLI argv", expanded=False):
+    with st.expander("pooled - CLI argv", expanded=False):
         st.code(" ".join(map(str, pooled_argv)), language="bash")
 
     code, out_png, stdout = _cli_plot(pooled_argv)
 
     if code == 0 and out_png.exists():
         st.success(f"Pooled figure → {out_png}")
-        st.image(str(out_png), use_container_width=True, caption="Methylation (pooled)")
+        st.image(
+            str(out_png),
+            use_container_width=True,
+            caption="Methylation (pooled)",
+        )
         st.download_button(
             "download pooled PNG",
             data=out_png.read_bytes(),
@@ -369,9 +409,10 @@ if go_meth:
             "--out",
             str(out_dir / meth_h1_png),
             "--hap-ref-plot",
+            "--min-hap-regions",
+            str(min_hap),
             "--ref-hap",
             "1",
-            "--auto-hap-match",
             str(parts["1"]),
             str(parts["2"]),
         ]
@@ -406,9 +447,10 @@ if go_meth:
             "--out",
             str(out_dir / meth_h2_png),
             "--hap-ref-plot",
+            "--min-hap-regions",
+            str(min_hap),
             "--ref-hap",
             "2",
-            "--auto-hap-match",
             str(parts["1"]),
             str(parts["2"]),
         ]
@@ -450,7 +492,9 @@ with c2:
         "copy-number output", value="copy_number.png", key="an_cn_png_name"
     )
 
-go_cn = st.button("plot copy number", type="secondary", use_container_width=True)
+go_cn = st.button(
+    "plot copy number", type="secondary", use_container_width=True
+)
 
 if go_cn:
     if not picked:
@@ -472,7 +516,7 @@ if go_cn:
             if p:
                 argv.append(str(p))
 
-    with st.expander("copy-number – CLI argv", expanded=False):
+    with st.expander("copy-number - CLI argv", expanded=False):
         st.code(" ".join(map(str, argv)), language="bash")
 
     code, out_png, stdout = _cli_plot(argv)

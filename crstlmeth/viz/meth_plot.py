@@ -6,6 +6,7 @@ methylation plotting helpers
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
 
@@ -17,6 +18,8 @@ import seaborn as sns
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
+from crstlmeth.core.logging import get_logger as core_get_logger
+from crstlmeth.core.logging import log_event
 from crstlmeth.core.stats import (
     approx_normal_params_from_quantiles,
     one_sample_z_test,
@@ -28,6 +31,32 @@ __all__ = [
     "plot_methylation_from_quantiles",
     "plot_methylation_levels_from_arrays",
 ]
+
+logger = logging.getLogger(__name__)
+
+# dedicated TSV debug logger (lazily created)
+_DEBUG_LOGGER: logging.Logger | None = None
+
+
+def _get_debug_logger() -> logging.Logger | None:
+    """
+    Return a TSV logger for per-region debug, shared across calls.
+
+    Writes to ./crstlmeth.plot-debug.log.tsv by default.
+
+    IMPORTANT:
+    We explicitly set the level to DEBUG so our debug events
+    are not filtered out by the default INFO level in core_get_logger.
+    """
+    global _DEBUG_LOGGER
+    if _DEBUG_LOGGER is not None:
+        return _DEBUG_LOGGER
+
+    log_path = Path.cwd() / "crstlmeth.plot-debug.log.tsv"
+    lg = core_get_logger(log_path)
+    lg.setLevel(logging.DEBUG)  # override default INFO so DEBUG is emitted
+    _DEBUG_LOGGER = lg
+    return _DEBUG_LOGGER
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -78,53 +107,94 @@ def _legend_from_labels(
 
 
 def _legend_add_offscale(ax: plt.Axes) -> None:
-    # Add an "off-scale" cross marker entry once
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="x",
-            linestyle="None",
-            markeredgecolor="black",
-            markerfacecolor="none",
-            markeredgewidth=1.2,
-            markersize=7.5,
-            label="off-scale",
-        )
-    ]
+    off = Line2D(
+        [0],
+        [0],
+        marker="x",
+        linestyle="None",
+        markeredgecolor="black",
+        markerfacecolor="none",
+        markeredgewidth=1.2,
+        markersize=7.5,
+        label="off-scale",
+    )
+
     leg = ax.get_legend()
     if leg is None:
-        ax.legend(handles=handles, loc="upper right", frameon=False)
-    else:
-        leg._legend_box._children[0]._children.extend(handles)  # type: ignore[attr-defined]
+        ax.legend(
+            handles=[off],
+            labels=["off-scale"],
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            frameon=False,
+        )
+        return
+
+    existing_handles = leg.legend_handles
+    existing_labels = [t.get_text() for t in leg.texts]
+
+    merged_handles = existing_handles + [off]
+    merged_labels = existing_labels + ["off-scale"]
+
+    leg.remove()
+    ax.legend(
+        handles=merged_handles,
+        labels=merged_labels,
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
+        frameon=False,
+    )
 
 
 def _legend_add_shading(ax: plt.Axes) -> None:
-    # a tiny legend snippet for shading semantics (placed above the sample legend)
-    items = [
+    """
+    Add legend entries for shaded intervals (flag + QC).
+    Works reliably on all recent Matplotlib versions.
+    """
+    new_handles = [
         Line2D(
             [0],
             [0],
             color=PALETTE.shade_flag,
             lw=6,
-            alpha=0.2,
-            label="flag: BH-FDR<0.05",
+            alpha=0.20,
+            label="flag (red): BH-FDR < 0.05",
         ),
         Line2D(
             [0],
             [0],
             color=PALETTE.shade_qc,
             lw=6,
-            alpha=0.3,
-            label="qc: ≥45% ungrouped",
+            alpha=0.30,
+            label="QC (blue): ungrouped ≥ threshold",
         ),
     ]
+
+    leg = ax.get_legend()
+
+    if leg is None:
+        ax.legend(
+            handles=new_handles,
+            labels=[h.get_label() for h in new_handles],
+            loc="center left",
+            bbox_to_anchor=(1.02, 0.5),
+            frameon=False,
+        )
+        return
+
+    existing_handles = leg.legend_handles
+    existing_labels = [text.get_text() for text in leg.texts]
+
+    merged_handles = existing_handles + new_handles
+    merged_labels = existing_labels + [h.get_label() for h in new_handles]
+
+    leg.remove()
     ax.legend(
-        items,
-        ["flag: BH-FDR<0.05", "qc: ≥45% ungrouped"],
-        loc="upper right",
+        handles=merged_handles,
+        labels=merged_labels,
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5),
         frameon=False,
-        bbox_to_anchor=(1.0, 1.02),
     )
 
 
@@ -273,8 +343,36 @@ def plot_methylation_from_quantiles(
             pad = np.full((targets.shape[0], n_keep - targets.shape[1]), np.nan)
             targets = np.hstack([targets, pad])
 
+    # ── DEBUG into TSV log: per region quantiles + target values ─────
+    dbg = _get_debug_logger()
+    n_tgt = targets.shape[0]
+    if dbg is not None:
+
+        def _clean(v: float) -> float | None:
+            return float(v) if np.isfinite(v) else None
+
+        for i, region in enumerate(regions_used):
+            params = {
+                "region": str(region),
+                "idx": int(i),
+                "q25": _clean(q25[i]),
+                "q50": _clean(q50[i]),
+                "q75": _clean(q75[i]),
+                "q10": _clean(q10[i]) if q10 is not None else None,
+                "q90": _clean(q90[i]) if q90 is not None else None,
+                "targets": [_clean(targets[k, i]) for k in range(n_tgt)],
+            }
+            log_event(
+                dbg,
+                level=logging.DEBUG,
+                event="meth-agg-debug",
+                cmd="plot_methylation_from_quantiles",
+                params=params,
+                message="region-stats",
+            )
+
     x = np.arange(n_keep)
-    fig, ax = plt.subplots(figsize=(max(10, n_keep * 0.62), 6.2))
+    fig, ax = plt.subplots(figsize=(max(11, n_keep * 0.70), 6.4))
 
     # QC shading (beneath everything)
     if qc_mask is not None and len(qc_mask) == len(regions):
@@ -285,15 +383,8 @@ def plot_methylation_from_quantiles(
             ax, qc_mask_used, color=PALETTE.shade_qc, alpha=0.30, z=0
         )
         if qc_note:
-            ax.text(
-                0.99,
-                1.015,
-                qc_note,
-                transform=ax.transAxes,
-                fontsize=8.6,
-                ha="right",
-                va="bottom",
-            )
+            # text suppressed in your current variant
+            pass
 
     # draw IQR boxes + whiskers like aggregated plot
     box_w = 0.62
@@ -343,7 +434,6 @@ def plot_methylation_from_quantiles(
     labels = list(target_labels)
     present = [lab for lab in labels]  # keep requested order
     pal = _target_palette(present, base="pastel")
-    n_tgt = targets.shape[0]
     offsets = np.linspace(-0.16, 0.16, num=max(1, n_tgt))
     y_min, y_max = -0.10, 1.10
 
@@ -378,7 +468,6 @@ def plot_methylation_from_quantiles(
                 continue
             z = np.zeros_like(mu)
             z[valid] = (row[valid] - mu[valid]) / sd[valid]
-            # normal CDF using scipy-like erf (avoid numpy.math)
             from math import erf, sqrt
 
             p = np.ones_like(mu)
@@ -416,11 +505,9 @@ def plot_methylation_from_quantiles(
     _legend_from_labels(ax, present, pal)
     _legend_add_shading(ax)
 
-    # halo around markers for visibility
     for c in ax.collections:
         c.set_path_effects([pe.withStroke(linewidth=1.4, foreground="white")])
 
-    # spacing
     fig.subplots_adjust(top=0.86, right=0.80, bottom=0.16, left=0.07)
     fig.tight_layout(rect=[0.05, 0.12, 0.80, 0.86])
     fig.savefig(save, bbox_inches="tight")
@@ -431,9 +518,9 @@ def plot_methylation_from_quantiles(
     }
 
 
-# ────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────
 # Full reference
-# ────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────
 def plot_methylation_levels_from_arrays(
     sample_lv: np.ndarray,  # (n_refs, n_regions) cohort methylation (0..1)
     target_lv: np.ndarray,  # (n_targets, n_regions)
@@ -460,8 +547,41 @@ def plot_methylation_levels_from_arrays(
     if target_lv.ndim == 1:
         target_lv = target_lv.reshape(1, -1)
 
+    # ── DEBUG into TSV: cohort quantiles + target per region ─────────
+    dbg = _get_debug_logger()
+    if sample_lv.size:
+        q25 = np.nanpercentile(sample_lv, 25, axis=0)
+        q50 = np.nanpercentile(sample_lv, 50, axis=0)
+        q75 = np.nanpercentile(sample_lv, 75, axis=0)
+    else:
+        q25 = q50 = q75 = np.full(len(region_names), np.nan)
+
+    n_tgt = target_lv.shape[0]
+    if dbg is not None:
+
+        def _clean(v: float) -> float | None:
+            return float(v) if np.isfinite(v) else None
+
+        for i, region in enumerate(region_names):
+            params = {
+                "region": str(region),
+                "idx": int(i),
+                "q25": _clean(q25[i]),
+                "q50": _clean(q50[i]),
+                "q75": _clean(q75[i]),
+                "targets": [_clean(target_lv[k, i]) for k in range(n_tgt)],
+            }
+            log_event(
+                dbg,
+                level=logging.DEBUG,
+                event="meth-full-debug",
+                cmd="plot_methylation_levels_from_arrays",
+                params=params,
+                message="region-stats",
+            )
+
     n = len(region_names)
-    fig, ax = plt.subplots(figsize=(max(10, n * 0.62), 6.2))
+    fig, ax = plt.subplots(figsize=(max(11, n * 0.70), 6.4))
 
     # QC shading
     if qc_mask is not None and len(qc_mask) == n:
@@ -473,15 +593,8 @@ def plot_methylation_levels_from_arrays(
             z=0,
         )
         if qc_note:
-            ax.text(
-                0.99,
-                1.015,
-                qc_note,
-                transform=ax.transAxes,
-                fontsize=8.6,
-                ha="right",
-                va="bottom",
-            )
+            # still suppressed in your current variant
+            pass
 
     # significance shading (z-test vs cohort)
     if shade_outliers and sample_lv.size and target_lv.size:
@@ -503,10 +616,8 @@ def plot_methylation_levels_from_arrays(
     present = labels[:]  # keep order
     pal = _target_palette(present, base="pastel")
 
-    # numeric x positions for all regions
     x = np.arange(n)
     y_min, y_max = -0.10, 1.10
-    n_tgt = target_lv.shape[0]
     offsets = np.linspace(-0.16, 0.16, num=max(1, n_tgt))
 
     had_any_off = False
@@ -536,7 +647,6 @@ def plot_methylation_levels_from_arrays(
     _legend_from_labels(ax, present, pal)
     _legend_add_shading(ax)
 
-    # halo on collections
     for c in ax.collections:
         c.set_path_effects([pe.withStroke(linewidth=1.4, foreground="white")])
 

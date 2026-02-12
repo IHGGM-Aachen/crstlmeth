@@ -7,6 +7,7 @@ wrappers around cmeth.py for building, reading, writing .cmeth files
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -30,41 +31,29 @@ __all__ = [
 
 
 # ────────────────────────────────────────────────────────────────────
-# tiny helpers for grouping and naming
+# helper for grouping and naming
 # ────────────────────────────────────────────────────────────────────
-def _sample_id_from_path(p: Path | str) -> str:
-    """
-    derive sample id from filename (prefix before first underscore)
-    """
-    name = Path(p).name
-    return name.split("_")[0] if "_" in name else name.split(".")[0]
+_BEDM_RE = re.compile(
+    r"""^(?P<sample>.+?)[._-](?P<hap>1|2|ungrouped)(?:[._-]\w+)*\.bedmethyl(?:\.gz)?$""",
+    re.IGNORECASE,
+)
 
 
-def _group_paths_by_sample(paths: List[Path]) -> Dict[str, List[Path]]:
+def _group_paths_by_sample_and_hap(
+    paths: List[Path],
+) -> Dict[str, Dict[str, Path]]:
     """
-    return {sample_id: [paths...]} from a flat list of files
+    Return {sample_id: {hap: Path}} from a flat list of files.
     """
-    out: Dict[str, List[Path]] = {}
+    out: Dict[str, Dict[str, Path]] = {}
     for p in paths:
-        out.setdefault(_sample_id_from_path(p), []).append(p)
+        m = _BEDM_RE.match(p.name)
+        if not m:
+            continue
+        sample = m["sample"]
+        hap = m["hap"]
+        out.setdefault(sample, {})[hap] = p
     return out
-
-
-def _classify_haps(paths: List[Path]) -> Dict[str, Path]:
-    """
-    map a list of paths into hap buckets {"1","2","ungrouped"} if present
-    returns only keys that exist
-    """
-    h: Dict[str, Path] = {}
-    for p in paths:
-        name = p.name
-        if "_1." in name and "bedmethyl" in name:
-            h["1"] = p
-        elif "_2." in name and "bedmethyl" in name:
-            h["2"] = p
-        elif "_ungrouped." in name and "bedmethyl" in name:
-            h["ungrouped"] = p
-    return h
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -286,7 +275,7 @@ def create_cmeth_aggregated(
     if not intervals:
         raise ValueError(f"no intervals found for kit/BED: {kit!r}")
 
-    groups = _group_paths_by_sample([Path(p) for p in bedmethyl_paths])
+    groups = _group_paths_by_sample_and_hap([Path(p) for p in bedmethyl_paths])
     sample_ids = sorted(groups)
     n_samples_total = len(sample_ids)
     if n_samples_total < max(2, k_min):
@@ -317,7 +306,7 @@ def create_cmeth_aggregated(
 
     # fill per-sample metrics
     for i, sid in enumerate(sample_ids):
-        h = _classify_haps(groups[sid])
+        h = groups[sid]
 
         for j, (chrom, start, end) in enumerate(intervals):
             L = max(1, end - start)
@@ -504,12 +493,12 @@ def create_cmeth_full(
     if not intervals:
         raise ValueError(f"no intervals found for kit/BED: {kit!r}")
 
-    groups = _group_paths_by_sample([Path(p) for p in bedmethyl_paths])
+    groups = _group_paths_by_sample_and_hap([Path(p) for p in bedmethyl_paths])
     sample_ids = sorted(groups)
     rows: List[dict] = []
 
     for sid in sample_ids:
-        parts = _classify_haps(groups[sid])
+        parts = groups[sid]
 
         for (chrom, start, end), region in zip(
             intervals, region_names, strict=False

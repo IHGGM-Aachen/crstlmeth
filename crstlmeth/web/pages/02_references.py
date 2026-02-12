@@ -17,7 +17,7 @@ from crstlmeth.cli.reference import create as cli_create
 from crstlmeth.core.references import parse_cmeth_header, read_cmeth
 from crstlmeth.web.sidebar import render_sidebar
 from crstlmeth.web.state import ensure_web_state, resolve_outdir
-from crstlmeth.web.utils import list_bundled_refs, list_builtin_kits
+from crstlmeth.web.utils import list_builtin_kits, list_bundled_refs
 
 # ────────────────────────────────────────────────────────────────────
 # page setup
@@ -31,7 +31,9 @@ ensure_web_state()
 st.title("references")
 render_sidebar()
 
-bed_by_sample: Dict[str, Dict[str, Path]] = st.session_state.setdefault("bed_by_sample", {})
+bed_by_sample: Dict[str, Dict[str, Path]] = st.session_state.setdefault(
+    "bed_by_sample", {}
+)
 cmeth_files: list[str] = st.session_state.setdefault("cmeth_files", [])
 custom_beds: list[str] = st.session_state.setdefault("custom_beds", [])
 
@@ -161,10 +163,16 @@ with st.container(border=True):
                     help="limit preview to avoid rendering very large tables",
                     key="ref_preview_rows",
                 )
-                if st.button("load preview", use_container_width=True, key="ref_load_preview"):
+                if st.button(
+                    "load preview",
+                    use_container_width=True,
+                    key="ref_load_preview",
+                ):
                     try:
                         df, _meta2 = read_cmeth(path)
-                        st.dataframe(df.head(int(n_rows)), use_container_width=True)
+                        st.dataframe(
+                            df.head(int(n_rows)), use_container_width=True
+                        )
                     except Exception as e:
                         st.error(f"failed to load data:\n{e}")
 
@@ -180,7 +188,9 @@ with st.container(border=True):
     )
 
     if not bed_by_sample:
-        st.warning("no bedmethyl files found - set folder on the home page and scan")
+        st.warning(
+            "no bedmethyl files found - set folder on the home page and scan"
+        )
         st.stop()
 
     c1, c2, c3 = st.columns([1, 1, 1], gap="large")
@@ -200,7 +210,11 @@ with st.container(border=True):
             help="when on, only samples with both hap1 and hap2 can be selected; ungrouped is ignored.",
         )
     with c3:
-        default_name = "reference_full.cmeth" if mode == "full" else "reference_aggregated.cmeth"
+        default_name = (
+            "reference_full.cmeth"
+            if mode == "full"
+            else "reference_aggregated.cmeth"
+        )
         out_file_name = st.text_input(
             "output file",
             value=default_name,
@@ -227,7 +241,9 @@ with st.container(border=True):
     default_kit = (st.session_state.get("default_kit") or "ME030").strip()
     default_label = f"bundled kit · {default_kit}"
     labels_only = [lbl for lbl, _ in bed_choices]
-    default_index = labels_only.index(default_label) if default_label in labels_only else 0
+    default_index = (
+        labels_only.index(default_label) if default_label in labels_only else 0
+    )
 
     c4, _ = st.columns([2, 1], gap="large")
     with c4:
@@ -244,7 +260,11 @@ with st.container(border=True):
     with st.expander("select samples", expanded=True):
         st.caption(
             f"{len(eligible)} selectable "
-            + ("(haplotype-resolved required)" if hap_resolved else "(all discovered samples)"),
+            + (
+                "(haplotype-resolved required)"
+                if hap_resolved
+                else "(all discovered samples)"
+            ),
             help="only samples listed below will be used to build the cohort",
         )
         selected_sids = st.multiselect(
@@ -254,14 +274,21 @@ with st.container(border=True):
             help="pick one or more samples for the reference",
         )
 
-    build = st.button("build reference", type="primary", use_container_width=True, key="ref_build")
+    build = st.button(
+        "build reference",
+        type="primary",
+        use_container_width=True,
+        key="ref_build",
+    )
 
     if build:
         if not selected_sids:
             st.error("select at least one sample")
             st.stop()
         if not out_file_name.strip():
-            st.error("provide an output filename (e.g. reference_aggregated.cmeth)")
+            st.error(
+                "provide an output filename (e.g. reference_aggregated.cmeth)"
+            )
             st.stop()
 
         paths: list[str] = []
@@ -343,4 +370,7 @@ with st.container(border=True):
 
         if result.exception:
             with st.expander("traceback", expanded=False):
-                st.code("".join(traceback.format_exception(result.exception)), language="python")
+                st.code(
+                    "".join(traceback.format_exception(result.exception)),
+                    language="python",
+                )

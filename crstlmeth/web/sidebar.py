@@ -6,7 +6,6 @@ Read-only sidebar. Never mutates paths or discovery state.
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
 import streamlit as st
@@ -90,5 +89,7 @@ def render_sidebar() -> None:
 
     st.sidebar.divider()
     st.sidebar.markdown(
-    f"*session id: `{session_id}`*" if session_id else "*session id: (unset)*"
-)
+        f"*session id: `{session_id}`*"
+        if session_id
+        else "*session id: (unset)*"
+    )

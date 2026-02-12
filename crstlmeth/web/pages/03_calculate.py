@@ -38,7 +38,9 @@ session_id: str = st.session_state["session_id"]
 out_dir = resolve_outdir(session_id)
 
 # discoveries/config
-bed_by_sample: Dict[str, Dict[str, Path]] = st.session_state.setdefault("bed_by_sample", {})
+bed_by_sample: Dict[str, Dict[str, Path]] = st.session_state.setdefault(
+    "bed_by_sample", {}
+)
 custom_beds: List[str] = st.session_state.setdefault("custom_beds", [])
 tabix_bin: str = (st.session_state.get("tabix_bin") or "tabix").strip()
 default_kit: str = (st.session_state.get("default_kit") or "ME030").strip()
@@ -135,7 +137,9 @@ st.subheader("single-interval methylation calculator")
 sids = sorted(bed_by_sample)
 sid = st.selectbox("sample", sids, key="calc_spot_sid")
 
-part_options = [k for k in ("1", "2", "ungrouped") if k in bed_by_sample.get(sid, {})]
+part_options = [
+    k for k in ("1", "2", "ungrouped") if k in bed_by_sample.get(sid, {})
+]
 if not part_options:
     st.warning("Selected sample has no hap1/hap2/ungrouped file entries.")
     st.stop()
@@ -155,8 +159,12 @@ if not bed_path:
 
 c1, c2, c3 = st.columns(3)
 chrom = c1.text_input("chrom", value="chr11", key="calc_spot_chr")
-start = c2.number_input("start", min_value=0, value=1_976_000, step=100, key="calc_spot_start")
-end = c3.number_input("end", min_value=1, value=1_976_200, step=100, key="calc_spot_end")
+start = c2.number_input(
+    "start", min_value=0, value=1_976_000, step=100, key="calc_spot_start"
+)
+end = c3.number_input(
+    "end", min_value=1, value=1_976_200, step=100, key="calc_spot_end"
+)
 
 if end <= start:
     st.error("end must be greater than start")
@@ -192,7 +200,9 @@ if not bed_choices:
 
 labels_only = [lbl for lbl, _ in bed_choices]
 default_label = f"bundled kit · {default_kit}"
-default_index = labels_only.index(default_label) if default_label in labels_only else 0
+default_index = (
+    labels_only.index(default_label) if default_label in labels_only else 0
+)
 
 bed_label = st.selectbox(
     "MLPA kit / BED",
@@ -206,7 +216,9 @@ kit_or_bed = bed_val  # load_intervals accepts either kit id or a BED path
 
 # optional: also allow uploading a temporary custom BED (kept under OUTDIR)
 with st.expander("optional: use a BED not in your configured folders"):
-    upl = st.file_uploader("upload BED", type=["bed"], key="calc_scan_bed_upload")
+    upl = st.file_uploader(
+        "upload BED", type=["bed"], key="calc_scan_bed_upload"
+    )
     if upl is not None:
         tmp_bed = _persist(upl)
         kit_or_bed = str(tmp_bed)
@@ -230,11 +242,15 @@ with right:
     )
 
 if not tgt_sid or not ref_sids:
-    st.info("Select one **target** and at least one **reference** sample to run the scan.")
+    st.info(
+        "Select one **target** and at least one **reference** sample to run the scan."
+    )
     st.stop()
 
 # allow supplementing target/ref with additional uploads (optional)
-with st.expander("optional: include extra target/reference files (not discovered)"):
+with st.expander(
+    "optional: include extra target/reference files (not discovered)"
+):
     col_t, col_r = st.columns(2)
     with col_t:
         extra_tgt = st.file_uploader(
@@ -253,7 +269,10 @@ with st.expander("optional: include extra target/reference files (not discovered
 
 # resolve discovered paths
 tgt_paths: List[Path] = _all_parts_for_sample(tgt_sid)
-ref_paths: List[Path] = [p for sid_ in ref_sids for p in _all_parts_for_sample(sid_)]
+ref_paths: List[Path] = [
+    p for sid_ in ref_sids for p in _all_parts_for_sample(sid_)
+]
+
 
 # persist extra uploads (store both gz + tbi if provided)
 def _collect_extra_bedmethyl(files: list | None) -> list[Path]:
@@ -267,10 +286,16 @@ def _collect_extra_bedmethyl(files: list | None) -> list[Path]:
     # return only gz files as inputs to methylation calls
     return [p for p in persisted if str(p).endswith(".gz")]
 
+
 tgt_paths.extend(_collect_extra_bedmethyl(extra_tgt))
 ref_paths.extend(_collect_extra_bedmethyl(extra_refs))
 
-if st.button("run deviation scan", type="primary", use_container_width=True, key="calc_scan_run"):
+if st.button(
+    "run deviation scan",
+    type="primary",
+    use_container_width=True,
+    key="calc_scan_run",
+):
     if not kit_or_bed:
         st.error("Select a **kit/BED** first.")
         st.stop()
@@ -293,7 +318,9 @@ if st.button("run deviation scan", type="primary", use_container_width=True, key
 
         mean_ref = np.nanmean(ref_lv, axis=0)
         std_ref = np.nanstd(ref_lv, axis=0, ddof=1)
-        std_ref = np.where((~np.isfinite(std_ref)) | (std_ref == 0.0), np.nan, std_ref)
+        std_ref = np.where(
+            (~np.isfinite(std_ref)) | (std_ref == 0.0), np.nan, std_ref
+        )
 
         flags = Methylation.get_deviations(ref_lv, tgt_pool, fdr_alpha=0.05)
         z_scores = (tgt_pool[0] - mean_ref) / std_ref
