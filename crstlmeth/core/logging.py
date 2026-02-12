@@ -14,6 +14,8 @@ from typing import Any
 
 import click
 
+import os
+
 __all__ = ["get_logger", "get_logger_from_cli", "log_event"]
 
 
@@ -121,20 +123,13 @@ def log_event(
     message: str = "ok",
     runtime_s: float | None = None,
 ) -> None:
-    """
-    emit a canonical tsv log line using the provided logger
+    # Prefer per-web-session id if present
+    session = (os.getenv("CRSTLMETH_SESSION") or "").strip() or getattr(
+        logger, "session_id", "local"
+    )
 
-    parameters:
-        logger     : result of get_logger()
-        level      : logging.INFO, WARNING or ERROR
-        event      : short tag (e.g. "analyze", "calculate-meth")
-        cmd        : raw cli command or internal function
-        params     : dictionary of user arguments (json-encoded)
-        message    : status message or error description
-        runtime_s  : optional elapsed time in seconds
-    """
     extra = {
-        "session": getattr(logger, "session_id", "local"),
+        "session": session,
         "event": event,
         "cmd": cmd,
         "params": params,

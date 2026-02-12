@@ -7,6 +7,8 @@ from pathlib import Path
 
 import streamlit as st
 
+import os
+
 from crstlmeth.config.settings import Settings, load_settings
 
 
@@ -47,16 +49,16 @@ def apply_settings_defaults(s: Settings) -> None:
 
 
 def ensure_web_state() -> None:
-    """
-    Initialize all web-facing state keys. Safe to call on every page.
-    """
-    # stable per-session id
+    # stable id
     st.session_state.setdefault("session_id", uuid.uuid4().hex[:8])
+
+    # expose to logging (used by core.logging.log_event)
+    os.environ["CRSTLMETH_SESSION"] = st.session_state["session_id"]
 
     # user-set folders
     st.session_state.setdefault("data_dir", "")
     st.session_state.setdefault("ref_dir", "")
-    st.session_state.setdefault("region_dir", "")  # custom region beds folder
+    st.session_state.setdefault("region_dir", "")
     st.session_state.setdefault("outdir", "")
     st.session_state.setdefault("outdir_resolved", "")
 
@@ -65,10 +67,8 @@ def ensure_web_state() -> None:
     st.session_state.setdefault("cmeth_files", [])
     st.session_state.setdefault("custom_beds", [])
 
-    # apply config as defaults (only fills blanks)
     apply_settings_defaults(get_settings())
 
-    # Ensure outdir_resolved is set early so Home + Sidebar can display it
     if not (st.session_state.get("outdir_resolved") or "").strip():
         out = resolve_outdir(st.session_state["session_id"])
         st.session_state["outdir_resolved"] = str(out)
