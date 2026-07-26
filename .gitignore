@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Local data / outputs
+data/
+output/
+*.cmeth
+*.cmeth.gz
+*.cmeth.gz.tbi
+!crstlmeth/refs/*.cmeth.gz
+!crstlmeth/refs/*.cmeth.gz.tbi
+*.log.tsv
+*.plot-debug.log.tsv
+sample_list.txt
+
+# Local notes / scratch
+Note
+compare.py
+cmeth_overlay_extended_vs_minimal.png
+*.tar.gz
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store

@@ -1,0 +1,14 @@
+# crstlmeth.toml
+
+[paths]
+data_dir = ""
+out_dir = ""
+refs_dir = ""
+regions_dir = ""
+tabix = "tabix"
+
+[defaults]
+kit = "dmr"
+
+[web]
+port = 8501

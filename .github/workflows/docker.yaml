@@ -1,0 +1,22 @@
+name: Docker
+
+on:
+  workflow_dispatch:
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build -t crstlmeth:dev .
+
+      - name: Test CLI
+        run: |
+          docker run --rm crstlmeth:dev crstlmeth --help
+          docker run --rm crstlmeth:dev crstlmeth reference --help
+          docker run --rm crstlmeth:dev crstlmeth plot --help
+          docker run --rm crstlmeth:dev crstlmeth web --help
