@@ -17,6 +17,8 @@ env/
 
 # Local data / outputs
 data/
+!tests/data/
+!tests/data/**
 output/
 *.cmeth
 *.cmeth.gz
