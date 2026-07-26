@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.1.2] - 2026-07-26
+
+### Added
+
+* **Extended CMETH reference format** with rich cohort-level region summaries.
+* **CpG-level reference rows** generated from observed bedMethyl loci inside target regions.
+* **CpG profile plotting** with pooled and haplotype-separated sample tracks.
+* **Interactive Plotly CpG profile output** with genomic coordinates, hover labels, and exportable CpG tables.
+* **Reference validation command** for checking CMETH structure and required fields.
+* **Reference size estimate command** for estimating CMETH row counts and approximate output size.
+* **Toy test dataset** covering sample detection, parsing, reference creation, CLI workflows, and plotting.
+* **GitHub Actions workflows** for checks, package build, Docker build, linting, and release artifacts.
+
+### Changed
+
+* **Reference strategy** now uses one privacy-preserving aggregated CMETH format instead of separate aggregated/full modes.
+* **Region summaries** are calculated as true per-sample DMR-level aggregates before cohort summarization.
+* **Haplotype reference naming** now uses `pooled`, `allele_low`, `allele_high`, and `unphased`.
+* **Sample-side haplotypes** remain `pooled`, `hap1`, `hap2`, and `unphased`.
+* **Analyze web page** now separates CpG profile, methylation, and copy-number workflows.
+* **Web sample collection** now recognizes underscore, dot, and dash role suffixes.
+* **Uploaded `.tbi` files** are detected for index status but are no longer passed as analysis inputs.
+* **Docker image** now installs the web dependencies and runs the Streamlit app on `0.0.0.0:8501`.
+
+### Fixed
+
+* **Methylation plotting with CpG-rich CMETH files** now filters to region rows where appropriate.
+* **Copy-number plotting with CMETH 1.2.3** now handles `hap_key` and rich reference rows correctly.
+* **Copy-number quantile handling** no longer creates duplicate renamed columns.
+* **Missing pandas import** in copy-number plotting command.
+* **Sample grouping helpers** restored for methylation plotting.
+* **Streamlit deprecation warnings** by replacing `use_container_width` with `width`.
+* **Tabix upload timestamp warning** by preserving matching `.bedmethyl.gz` and `.tbi` pair timestamps.
+* **CI test failures** by committing the toy fixtures under `tests/data`.
+
+
 ## [0.1.1] - 2025-10-01
 
 ### Added
@@ -25,8 +61,6 @@
 * **Sample selector reset** during selection - stabilized multiselect and session usage.
 * **Haplotype discovery** edge cases (looser filename handling).
 
-
----
 
 ## [0.1.0] - 2025-09-16
 
