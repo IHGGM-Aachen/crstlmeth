@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.4] - 2026-08-13
+
+### Fixed
+
+* **PyPI-installed web app** no longer crashes when the optional `crstlmeth/refs` resource directory is absent.
+* **Analyze and reference pages** now treat missing bundled references as an empty bundled-reference list.
+* **Source tree** now includes an empty `crstlmeth/refs` directory placeholder for packaging stability.
+
+
 ## [0.1.3] - 2026-08-13
 
 ### Fixed

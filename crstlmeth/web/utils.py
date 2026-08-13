@@ -129,3 +129,32 @@ def preserve_tabix_pair_timestamp(bedmethyl_gz: Path) -> None:
             tbi,
             ns=(index_stat.st_atime_ns, new_mtime_ns),
         )
+
+# ---- crstlmeth hotfix: safe optional bundled resources ----
+def _export_traversable_dir(trav, cache):
+    """
+    Export an importlib Traversable directory to a real filesystem directory.
+
+    Optional bundled resource directories may be absent in installed wheels.
+    Missing directories are treated as empty instead of crashing the web UI.
+    """
+    cache.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if not trav.is_dir():
+            return
+        items = list(trav.iterdir())
+    except (FileNotFoundError, ModuleNotFoundError, OSError):
+        return
+
+    for item in items:
+        out = cache / item.name
+        try:
+            if item.is_dir():
+                _export_traversable_dir(item, out)
+            else:
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(item.read_bytes())
+        except (FileNotFoundError, ModuleNotFoundError, OSError):
+            continue
+
