@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3] - 2026-08-13
+
+### Fixed
+
+* **Docker web startup** no longer fails when `CRSTLMETH_LOGFILE` is already present in the container environment.
+* **CLI web command** now safely overrides the log-file environment variable using a copied environment mapping.
+
+
 ## [0.1.2] - 2026-07-26
 
 ### Added

@@ -132,7 +132,8 @@ def web_cmd(ctx: click.Context, config: Path | None, port: int) -> None:
         "--server.port",
         str(port),
     ]
-    env = dict(**os.environ, CRSTLMETH_LOGFILE=str(log_path))
+    env = os.environ.copy()
+    env["CRSTLMETH_LOGFILE"] = str(log_path)
     if cfg_path:
         env["CRSTLMETH_CONFIG"] = str(cfg_path)
 
