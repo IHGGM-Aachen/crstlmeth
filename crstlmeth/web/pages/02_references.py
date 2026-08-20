@@ -89,6 +89,21 @@ with st.container(border=True):
     )
     bundled = list_bundled_refs()
     ref_choices = _make_grouped_cmeth_choices(bundled, cmeth_files)
+    uploaded_cmeth = st.file_uploader(
+        "optional upload CMETH for inspection",
+        type=["cmeth", "gz"],
+        key="ref_inspect_cmeth_upload",
+    )
+    if uploaded_cmeth is not None:
+        upload_dir = out_base / "uploads" / "references"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        uploaded_path = upload_dir / Path(uploaded_cmeth.name).name
+        uploaded_path.write_bytes(uploaded_cmeth.getbuffer())
+        if str(uploaded_path) not in cmeth_files:
+            cmeth_files.append(str(uploaded_path))
+        ref_choices.append((f"uploaded  -  {uploaded_path.name}", uploaded_path))
+        st.caption(f"uploaded reference: {uploaded_path}")
+
     if not ref_choices:
         st.warning("no CMETH files available (bundled or external)")
     else:
@@ -156,7 +171,7 @@ with st.container(border=True):
     )
     if not bed_by_sample:
         st.warning(
-            "no bedmethyl files found - set folder on the home page and scan"
+            "no bedmethyl files found - use Setup to scan folders or add upload support here"
         )
         st.stop()
 
