@@ -22,7 +22,7 @@ from crstlmeth.web.state import ensure_web_state
 # --------------------------------------------------------------------
 # page config + state
 # --------------------------------------------------------------------
-st.set_page_config(page_title="crstlmeth", page_icon=":material/home:")
+st.set_page_config(page_title="crstlmeth - setup", page_icon=":material/settings:")
 
 ensure_web_state()
 
@@ -74,16 +74,16 @@ with col_logo:
         st.image(str(LOGO), width=160)
 
 with col_txt:
-    st.title("crstlmeth")
+    st.title("setup")
     st.markdown(
-        "crstlmeth is a toolkit for analysis and visualization of **bedmethyl** data."
+        "Optional folder setup for crstlmeth. You can also upload files directly on the Analyze page."
     )
 
 st.markdown("""
 workflow:
-1. set folders (data, references, optional custom regions) and scan.
-2. use **analyze** to upload targets and plot (defaults to bundled refs).
-3. use **references** to create/view `.cmeth` cohort files.
+1. use **analyze** first for routine case analysis.
+2. optionally use this **setup** page to scan server-side data, reference, and region folders.
+3. use **references** for advanced CMETH inspection and creation.
 """)
 
 st.divider()
