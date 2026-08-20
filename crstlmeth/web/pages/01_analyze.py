@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import traceback
+import tomllib
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -27,7 +28,7 @@ from crstlmeth.core.cpg_profile import (
     match_region,
     select_sample_tracks,
 )
-from crstlmeth.core.discovery import scan_bedmethyl
+from crstlmeth.core.discovery import scan_bedmethyl, scan_cmeth, scan_region_beds
 from crstlmeth.core.methylation import Methylation
 from crstlmeth.core.references import read_cmeth
 from crstlmeth.core.regions import load_intervals
@@ -105,6 +106,97 @@ def _combine_bed_maps(
         out.setdefault(sid, {})
         out[sid].update(parts)
     return out
+
+
+
+def _dedupe_paths(xs: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for x in xs:
+        if not x:
+            continue
+        sx = str(x)
+        if sx not in seen:
+            seen.add(sx)
+            out.append(sx)
+    return out
+
+
+def _apply_uploaded_config(cfg: dict) -> list[str]:
+    """
+    Apply an optional TOML config to Analyze page session state.
+
+    Supported examples:
+      [paths] data_dir, ref_dir/refs_dir, region_dir/regions_dir, output_dir/out_dir
+      [reference] cmeth
+      [regions] bed or kit
+    """
+    summary: list[str] = []
+
+    paths = cfg.get("paths", {}) if isinstance(cfg.get("paths", {}), dict) else {}
+    reference = cfg.get("reference", {}) if isinstance(cfg.get("reference", {}), dict) else {}
+    regions = cfg.get("regions", {}) if isinstance(cfg.get("regions", {}), dict) else {}
+
+    data_dir = paths.get("data_dir") or cfg.get("data_dir")
+    ref_dir = paths.get("ref_dir") or paths.get("refs_dir") or cfg.get("ref_dir") or cfg.get("refs_dir")
+    region_dir = paths.get("region_dir") or paths.get("regions_dir") or cfg.get("region_dir") or cfg.get("regions_dir")
+    outdir = paths.get("output_dir") or paths.get("out_dir") or cfg.get("output_dir") or cfg.get("out_dir")
+
+    for key, value in (
+        ("data_dir", data_dir),
+        ("ref_dir", ref_dir),
+        ("region_dir", region_dir),
+        ("outdir", outdir),
+    ):
+        if value:
+            st.session_state[key] = str(value)
+            summary.append(f"{key}: {value}")
+
+    if regions.get("kit"):
+        st.session_state["default_kit"] = str(regions["kit"])
+        summary.append(f"default_kit: {regions['kit']}")
+
+    if data_dir:
+        p = Path(str(data_dir)).expanduser()
+        if p.exists():
+            scanned = scan_bedmethyl(p, require_index=False)
+            st.session_state["bed_by_sample"] = _combine_bed_maps(
+                st.session_state.get("bed_by_sample", {}),
+                scanned,
+            )
+            summary.append(f"scanned samples: {len(scanned)}")
+
+    cmeth_files_new = list(st.session_state.get("cmeth_files", []) or [])
+    if ref_dir:
+        p = Path(str(ref_dir)).expanduser()
+        if p.exists():
+            found = [str(x) for x in scan_cmeth(p)]
+            cmeth_files_new.extend(found)
+            summary.append(f"scanned CMETH refs: {len(found)}")
+
+    cmeth_path = reference.get("cmeth") or cfg.get("cmeth")
+    if cmeth_path:
+        cmeth_files_new.append(str(Path(str(cmeth_path)).expanduser()))
+        summary.append(f"config CMETH: {cmeth_path}")
+
+    bed_files_new = list(st.session_state.get("custom_beds", []) or [])
+    if region_dir:
+        p = Path(str(region_dir)).expanduser()
+        if p.exists():
+            found = [str(x) for x in scan_region_beds(p)]
+            bed_files_new.extend(found)
+            summary.append(f"scanned BED regions: {len(found)}")
+
+    bed_path = regions.get("bed") or cfg.get("bed")
+    if bed_path:
+        bed_files_new.append(str(Path(str(bed_path)).expanduser()))
+        summary.append(f"config BED: {bed_path}")
+
+    st.session_state["cmeth_files"] = _dedupe_paths(cmeth_files_new)
+    st.session_state["custom_beds"] = _dedupe_paths(bed_files_new)
+    st.session_state["_has_config"] = True
+
+    return summary
 
 
 def _cli_plot(argv: list[str]) -> tuple[int, Path, str]:
@@ -220,6 +312,34 @@ def _cmd_text(argv: list[str]) -> str:
 
 def _part_summary(parts: Dict[str, Path]) -> str:
     return summarize_parts(parts)
+
+
+
+with st.container(border=True):
+    st.subheader("optional config file")
+    st.caption(
+        "Upload a TOML config to prefill paths and scan server-side folders. "
+        "This is optional; direct uploads below still work."
+    )
+    cfg_upload = st.file_uploader(
+        "upload TOML config",
+        type=["toml"],
+        key="analyze_config_upload",
+    )
+    if cfg_upload is not None and st.button(
+        "apply config", key="analyze_config_apply", width="stretch"
+    ):
+        try:
+            cfg_text = cfg_upload.getvalue().decode("utf-8")
+            cfg = tomllib.loads(cfg_text)
+            summary = _apply_uploaded_config(cfg)
+        except Exception as e:
+            st.error(f"failed to apply config: {e}")
+        else:
+            st.success("config applied")
+            if summary:
+                st.code("\n".join(summary), language="text")
+            st.rerun()
 
 
 def _sample_input_panel(
