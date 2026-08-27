@@ -106,12 +106,14 @@ def deviation(
     log = get_logger_from_cli(click.get_current_context())
     log_event(
         log,
+        cmd="calculate deviation",
         event="deviation_start",
-        details={
+        params={
             "kit": kit,
             "references": ";".join(str(p) for p in ref_paths),
             "target": str(tgt_paths[0]),
         },
+        message="start",
     )
 
     try:
@@ -134,7 +136,19 @@ def deviation(
         table.to_csv(out, sep="\t", index=False)
         click.echo(f"deviation table written to {out.resolve()}")
 
-        log_event(log, event="deviation_done", details={"out": str(out)})
+        log_event(
+            log,
+            cmd="calculate deviation",
+            event="deviation_done",
+            params={"out": str(out)},
+            message="ok",
+        )
     except Exception as exc:  # noqa: BLE001
-        log_event(log, event="deviation_error", details={"error": str(exc)})
+        log_event(
+            log,
+            cmd="calculate deviation",
+            event="deviation_error",
+            params={"error": str(exc)},
+            message="error",
+        )
         raise click.ClickException(str(exc)) from exc
