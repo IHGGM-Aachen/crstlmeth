@@ -36,13 +36,15 @@ def methylation(bedmethyl: Path, chrom: str, start: int, end: int) -> None:
     log = get_logger_from_cli(click.get_current_context())
     log_event(
         log,
+        cmd="calculate methylation",
         event="methylation_start",
-        details={
+        params={
             "file": str(bedmethyl),
             "chrom": chrom,
             "start": start,
             "end": end,
         },
+        message="start",
     )
 
     try:
@@ -56,9 +58,17 @@ def methylation(bedmethyl: Path, chrom: str, start: int, end: int) -> None:
         )
         log_event(
             log,
+            cmd="calculate methylation",
             event="methylation_done",
-            details={"nmod": n_mod, "nvalid": n_valid, "pct": f"{pct:.2f}"},
+            params={"nmod": n_mod, "nvalid": n_valid, "pct": f"{pct:.2f}"},
+            message="ok",
         )
     except Exception as exc:  # noqa: BLE001
-        log_event(log, event="methylation_error", details={"error": str(exc)})
+        log_event(
+            log,
+            cmd="calculate methylation",
+            event="methylation_error",
+            params={"error": str(exc)},
+            message="error",
+        )
         raise click.ClickException(str(exc)) from exc
